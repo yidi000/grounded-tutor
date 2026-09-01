@@ -16,7 +16,11 @@ from grounded_tutor.config import Settings
 from grounded_tutor.db import get_session
 from grounded_tutor.dependencies import get_fastgpt
 from grounded_tutor.domain.models import Source, SourceStatus, SourceType, Workspace
-from grounded_tutor.repositories.workspaces import WorkspacePersistenceError, WorkspaceRepository
+from grounded_tutor.repositories.workspaces import (
+    WorkspacePersistenceError,
+    WorkspacePersistenceOutcome,
+    WorkspaceRepository,
+)
 from grounded_tutor.services.workspaces import WorkspaceService
 
 
@@ -156,7 +160,9 @@ def test_db_failure_compensates_exact_created_dataset_and_remains_safe(
     client: TestClient, fake_fastgpt: FakeFastGPT, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail_create(self: WorkspaceRepository, *, title: str, dataset_id: str):
-        raise WorkspacePersistenceError("not public")
+        raise WorkspacePersistenceError(
+            "not public", outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+        )
 
     monkeypatch.setattr(WorkspaceRepository, "create", fail_create)
 
@@ -174,7 +180,11 @@ def test_db_failure_stays_safe_when_compensation_fails(
     monkeypatch.setattr(
         WorkspaceRepository,
         "create",
-        lambda self, **kwargs: (_ for _ in ()).throw(WorkspacePersistenceError("internal")),
+        lambda self, **kwargs: (_ for _ in ()).throw(
+            WorkspacePersistenceError(
+                "internal", outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            )
+        ),
     )
     fake_fastgpt.delete_dataset = AsyncMock(side_effect=RuntimeError("dataset-1 secret"))
 
@@ -260,7 +270,7 @@ async def test_add_failure_rolls_back_and_compensates_exact_dataset(api_engine) 
     finally:
         session.close()
 
-    assert caught.value.committed is False
+    assert caught.value.outcome is WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
     assert fake_fastgpt.delete_dataset_calls == ["dataset-1"]
     assert _workspace_count(api_engine) == 0
 
@@ -283,13 +293,13 @@ async def test_flush_failure_rolls_back_and_compensates_exact_dataset(api_engine
     finally:
         session.close()
 
-    assert caught.value.committed is False
+    assert caught.value.outcome is WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
     assert fake_fastgpt.delete_dataset_calls == ["dataset-1"]
     assert _workspace_count(api_engine) == 0
 
 
 @pytest.mark.asyncio
-async def test_commit_failure_rolls_back_and_compensates_exact_dataset(api_engine) -> None:
+async def test_commit_failure_is_ambiguous_and_does_not_compensate(api_engine) -> None:
     class CommitFailingSession(Session):
         def commit(self) -> None:
             raise SQLAlchemyError("commit failed")
@@ -305,8 +315,8 @@ async def test_commit_failure_rolls_back_and_compensates_exact_dataset(api_engin
     finally:
         session.close()
 
-    assert caught.value.committed is False
-    assert fake_fastgpt.delete_dataset_calls == ["dataset-1"]
+    assert caught.value.outcome is WorkspacePersistenceOutcome.UNKNOWN_OR_COMMITTED
+    assert fake_fastgpt.delete_dataset_calls == []
     assert _workspace_count(api_engine) == 0
 
 
@@ -332,6 +342,29 @@ async def test_post_commit_refresh_failure_does_not_compensate_committed_workspa
         persisted = check_session.scalar(select(Workspace).where(Workspace.id == workspace.id))
     assert persisted is not None
     assert persisted.dataset_id == "dataset-1"
+
+
+def test_after_commit_failure_preserves_durable_workspace_and_dataset(api_engine) -> None:
+    class AfterCommitFailingSession(Session):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            event.listen(self, "after_commit", self._raise_after_commit)
+
+        def _raise_after_commit(self, session) -> None:
+            raise SQLAlchemyError("after commit failed")
+
+    fake_fastgpt = FakeFastGPT()
+
+    with _client_with_session(api_engine, fake_fastgpt, AfterCommitFailingSession) as client:
+        response = client.post("/api/workspaces", json={"title": "Statistics"})
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": {"code": "persistence_error"}}
+    assert fake_fastgpt.delete_dataset_calls == []
+    with Session(api_engine) as check_session:
+        persisted = check_session.scalar(select(Workspace).where(Workspace.dataset_id == "dataset-1"))
+    assert persisted is not None
+    assert persisted.title == "Statistics"
 
 
 def test_add_failure_with_compensation_failure_returns_safe_api_error(api_engine) -> None:

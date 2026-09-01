@@ -5,6 +5,7 @@ from uuid import UUID
 from grounded_tutor.adapters.fastgpt import FastGPTPort
 from grounded_tutor.repositories.workspaces import (
     WorkspacePersistenceError,
+    WorkspacePersistenceOutcome,
     WorkspaceRepository,
     WorkspaceSummary,
 )
@@ -44,7 +45,7 @@ class WorkspaceService:
         try:
             return self._repository.create(title=title, dataset_id=dataset.dataset_id)
         except WorkspacePersistenceError as error:
-            if not error.committed:
+            if error.outcome is WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED:
                 await self._compensate_dataset_creation(dataset.dataset_id)
             raise
 

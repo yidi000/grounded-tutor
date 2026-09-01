@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import case, func, select
@@ -12,11 +13,21 @@ from sqlalchemy.orm import Session
 from grounded_tutor.domain.models import Source, SourceStatus, Workspace
 
 
+class WorkspacePersistenceOutcome(str, Enum):
+    DEFINITELY_UNCOMMITTED = "definitely_uncommitted"
+    UNKNOWN_OR_COMMITTED = "unknown_or_committed"
+
+
 class WorkspacePersistenceError(RuntimeError):
     """A local persistence failure whose implementation details are private."""
 
-    def __init__(self, message: str = "Workspace persistence failed.", *, committed: bool = False) -> None:
-        self.committed = committed
+    def __init__(
+        self,
+        message: str = "Workspace persistence failed.",
+        *,
+        outcome: WorkspacePersistenceOutcome,
+    ) -> None:
+        self.outcome = outcome
         super().__init__(message)
 
 
@@ -36,18 +47,23 @@ class WorkspaceRepository:
 
     def create(self, *, title: str, dataset_id: str) -> WorkspaceSummary:
         workspace = Workspace(title=title, dataset_id=dataset_id)
-        committed = False
         try:
             self._session.add(workspace)
             self._session.flush()
             summary = _summary(workspace, source_count=0, ready_source_count=0)
-            self._session.commit()
-            committed = True
-            return summary
         except SQLAlchemyError as error:
-            if not committed:
-                self._rollback()
-            raise WorkspacePersistenceError(committed=committed) from error
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
+        try:
+            self._session.commit()
+        except SQLAlchemyError as error:
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.UNKNOWN_OR_COMMITTED
+            ) from error
+        return summary
 
     def list(self) -> list[WorkspaceSummary]:
         try:
@@ -55,7 +71,9 @@ class WorkspaceRepository:
             return [_summary_from_row(row) for row in rows]
         except SQLAlchemyError as error:
             self._rollback()
-            raise WorkspacePersistenceError(committed=False) from error
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
 
     def get(self, workspace_id: UUID) -> WorkspaceSummary | None:
         try:
@@ -65,10 +83,11 @@ class WorkspaceRepository:
             return _summary_from_row(row) if row is not None else None
         except SQLAlchemyError as error:
             self._rollback()
-            raise WorkspacePersistenceError(committed=False) from error
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
 
     def rename(self, workspace_id: UUID, *, title: str) -> WorkspaceSummary | None:
-        committed = False
         try:
             workspace = self._session.get(Workspace, workspace_id)
             if workspace is None:
@@ -76,13 +95,19 @@ class WorkspaceRepository:
             workspace.title = title
             self._session.flush()
             summary = self._get_summary(workspace_id)
-            self._session.commit()
-            committed = True
-            return summary
         except SQLAlchemyError as error:
-            if not committed:
-                self._rollback()
-            raise WorkspacePersistenceError(committed=committed) from error
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
+        try:
+            self._session.commit()
+        except SQLAlchemyError as error:
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.UNKNOWN_OR_COMMITTED
+            ) from error
+        return summary
 
     def _get_summary(self, workspace_id: UUID) -> WorkspaceSummary | None:
         row = self._session.execute(
