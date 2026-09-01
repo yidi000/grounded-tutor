@@ -72,12 +72,14 @@ class FakeFastGPT(FastGPTPort):
     async def create_file_collection(
         self, dataset_id: str, filename: str, content: bytes, config: Mapping[str, Any]
     ) -> CollectionRef:
+        self._require_dataset(dataset_id)
         self.create_file_collection_calls.append((dataset_id, filename, content, dict(config)))
         return self._create_collection(dataset_id, filename, content, config)
 
     async def create_text_collection(
         self, dataset_id: str, name: str, text: str, config: Mapping[str, Any]
     ) -> CollectionRef:
+        self._require_dataset(dataset_id)
         self.create_text_collection_calls.append((dataset_id, name, text, dict(config)))
         return self._create_collection(dataset_id, name, text, config)
 
@@ -133,16 +135,20 @@ class FakeFastGPT(FastGPTPort):
         )
         return CollectionRef(collection_id, inserted_count=1)
 
+    def _require_dataset(self, dataset_id: str) -> None:
+        if dataset_id not in self.datasets:
+            raise ValueError("dataset_id does not exist")
+
 
 class FakeGeneration(GenerationPort):
     """Configurable generation substitute which records user-visible inputs."""
 
     def __init__(self, answer: GeneratedAnswer) -> None:
         self.answer = answer
-        self.calls: list[tuple[str, list[RetrievedChunk]]] = []
+        self.calls: list[tuple[str, tuple[RetrievedChunk, ...]]] = []
 
     async def generate_answer(
         self, question: str, chunks: Sequence[RetrievedChunk]
     ) -> GeneratedAnswer:
-        self.calls.append((question, list(chunks)))
+        self.calls.append((question, tuple(chunks)))
         return self.answer

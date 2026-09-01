@@ -73,8 +73,6 @@ class SearchRequest:
             _validate_nonempty_string(self.extension_model, "extension_model")
         if type(self.extension_background) is not str:
             raise TypeError("extension_background must be a str")
-        if self.extension_query and self.extension_model is None:
-            raise ValueError("extension_model is required when extension_query is enabled")
 
 
 class FastGPTPort(Protocol):

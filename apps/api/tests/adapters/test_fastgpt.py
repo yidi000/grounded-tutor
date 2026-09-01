@@ -254,6 +254,24 @@ async def test_search_maps_all_fastgpt_request_fields_when_extension_is_enabled(
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_search_allows_extension_query_without_explicit_extension_model() -> None:
+    route = respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(200, json={"code": 200, "data": []})
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    await client.search(
+        SearchRequest("dataset-1", "mean", extension_query=True, extension_model=None)
+    )
+
+    payload = _request_json(route.calls.last.request)
+    assert payload["datasetSearchUsingExtensionQuery"] is True
+    assert "datasetSearchExtensionModel" not in payload
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
 @pytest.mark.parametrize(
     "response",
     [
@@ -465,7 +483,6 @@ async def test_collection_result_maps_nested_insert_count() -> None:
         {"dataset_id": "dataset-1", "text": "question", "search_mode": "unknown"},
         {"dataset_id": "dataset-1", "text": "question", "using_rerank": 1},
         {"dataset_id": "dataset-1", "text": "question", "extension_query": 0},
-        {"dataset_id": "dataset-1", "text": "question", "extension_query": True},
         {
             "dataset_id": "dataset-1",
             "text": "question",

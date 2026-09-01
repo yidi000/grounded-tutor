@@ -41,6 +41,7 @@ async def test_fake_generation_records_calls_and_returns_configured_answer() -> 
     assert result == answer
     assert isinstance(result.claims, tuple)
     assert isinstance(result.claims[0].chunk_ids, tuple)
+    assert fake.calls == [("What is the mean?", tuple(chunks))]
 
 
 @pytest.mark.asyncio
@@ -68,3 +69,19 @@ async def test_fake_search_results_override_returns_explicit_raw_external_result
     results = await fake.search(SearchRequest("missing-dataset", "question"))
 
     assert results[0].chunk_id == "remote-1"
+
+
+@pytest.mark.asyncio
+async def test_fake_collection_creation_rejects_unknown_dataset_without_mutating_state() -> None:
+    fake = FakeFastGPT()
+
+    with pytest.raises(ValueError, match="dataset"):
+        await fake.create_file_collection("missing", "notes.pdf", b"content", {})
+    with pytest.raises(ValueError, match="dataset"):
+        await fake.create_text_collection("missing", "notes", "content", {})
+
+    assert fake.datasets == {}
+    assert fake.collections == {}
+    dataset = await fake.create_dataset("Statistics")
+    collection = await fake.create_text_collection(dataset.dataset_id, "notes", "content", {})
+    assert collection.collection_id == "collection-1"
