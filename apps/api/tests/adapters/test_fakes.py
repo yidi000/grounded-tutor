@@ -1,7 +1,7 @@
 import pytest
 
 from grounded_tutor.adapters.fakes import FakeFastGPT, FakeGeneration
-from grounded_tutor.adapters.fastgpt import SearchRequest
+from grounded_tutor.adapters.fastgpt import RetrievedChunk, SearchRequest
 from grounded_tutor.adapters.generation import GeneratedAnswer, GeneratedClaim
 
 
@@ -39,4 +39,32 @@ async def test_fake_generation_records_calls_and_returns_configured_answer() -> 
     result = await fake.generate_answer("What is the mean?", chunks)
 
     assert result == answer
-    assert fake.calls == [("What is the mean?", chunks)]
+    assert isinstance(result.claims, tuple)
+    assert isinstance(result.claims[0].chunk_ids, tuple)
+
+
+@pytest.mark.asyncio
+async def test_fake_search_ignores_missing_datasets_and_forbidden_collections() -> None:
+    fake = FakeFastGPT()
+    dataset = await fake.create_dataset("Statistics")
+    collection = await fake.create_text_collection(dataset.dataset_id, "means", "mean", {})
+    await fake.create_text_collection(dataset.dataset_id, "medians", "median", {})
+
+    assert await fake.search(SearchRequest("missing-dataset", "mean")) == []
+    assert len(await fake.search(SearchRequest(dataset.dataset_id, "mean", limit=1))) == 2
+    await fake.set_collection_forbidden(collection.collection_id, True)
+    assert [
+        item.collection_id for item in await fake.search(SearchRequest(dataset.dataset_id, "mean"))
+    ] == ["collection-2"]
+
+
+@pytest.mark.asyncio
+async def test_fake_search_results_override_returns_explicit_raw_external_results() -> None:
+    fake = FakeFastGPT()
+    fake.search_results_override = (
+        RetrievedChunk("remote-1", "remote-collection", "remote", "q", "a", 0.9),
+    )
+
+    results = await fake.search(SearchRequest("missing-dataset", "question"))
+
+    assert results[0].chunk_id == "remote-1"

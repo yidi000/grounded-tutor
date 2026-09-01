@@ -33,7 +33,8 @@ class FakeFastGPT(FastGPTPort):
     def __init__(self) -> None:
         self.datasets: dict[str, DatasetRef] = {}
         self.collections: dict[str, FakeCollection] = {}
-        self.search_results: list[RetrievedChunk] = []
+        # When set, this models raw search results received from FastGPT and bypasses local state.
+        self.search_results_override: tuple[RetrievedChunk, ...] | None = None
         self.create_dataset_calls: list[tuple[str, str | None, str | None, str | None]] = []
         self.delete_dataset_calls: list[str] = []
         self.create_file_collection_calls: list[tuple[str, str, bytes, dict[str, Any]]] = []
@@ -87,15 +88,17 @@ class FakeFastGPT(FastGPTPort):
     async def list_collection_data(
         self, collection_id: str, page_size: int = 30
     ) -> list[ProcessedChunk]:
-        if not 1 <= page_size <= 30:
+        if type(page_size) is not int or not 1 <= page_size <= 30:
             raise ValueError("page_size must be between 1 and 30")
         self.list_collection_data_calls.append((collection_id, page_size))
         return self.collections[collection_id].chunks[:page_size]
 
     async def search(self, request: SearchRequest) -> list[RetrievedChunk]:
         self.search_calls.append(request)
-        if self.search_results:
-            return list(self.search_results[: request.limit])
+        if self.search_results_override is not None:
+            return list(self.search_results_override)
+        if request.dataset_id not in self.datasets:
+            return []
         results: list[RetrievedChunk] = []
         for collection_id, collection in self.collections.items():
             if collection.dataset_id != request.dataset_id or collection.forbidden:
@@ -111,7 +114,7 @@ class FakeFastGPT(FastGPTPort):
                         score=1.0,
                     )
                 )
-        return results[: request.limit]
+        return results
 
     def _create_collection(
         self, dataset_id: str, name: str, content: bytes | str, config: Mapping[str, Any]

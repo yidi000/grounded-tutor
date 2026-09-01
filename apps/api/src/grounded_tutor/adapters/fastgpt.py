@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, Self
@@ -49,6 +50,31 @@ class SearchRequest:
     extension_query: bool = False
     extension_model: str | None = None
     extension_background: str = ""
+
+    def __post_init__(self) -> None:
+        _validate_nonempty_string(self.dataset_id, "dataset_id")
+        _validate_nonempty_string(self.text, "text")
+        if type(self.limit) is not int or not 1 <= self.limit <= 20_000:
+            raise ValueError("limit must be an integer between 1 and 20000")
+        if (
+            isinstance(self.similarity, bool)
+            or not isinstance(self.similarity, int | float)
+            or not math.isfinite(self.similarity)
+            or not 0 <= self.similarity <= 1
+        ):
+            raise ValueError("similarity must be a finite number between 0 and 1")
+        if self.search_mode not in {"embedding", "fullTextRecall", "mixedRecall"}:
+            raise ValueError("search_mode must be embedding, fullTextRecall, or mixedRecall")
+        if type(self.using_rerank) is not bool:
+            raise TypeError("using_rerank must be a bool")
+        if type(self.extension_query) is not bool:
+            raise TypeError("extension_query must be a bool")
+        if self.extension_model is not None:
+            _validate_nonempty_string(self.extension_model, "extension_model")
+        if type(self.extension_background) is not str:
+            raise TypeError("extension_background must be a str")
+        if self.extension_query and self.extension_model is None:
+            raise ValueError("extension_model is required when extension_query is enabled")
 
 
 class FastGPTPort(Protocol):
@@ -101,7 +127,7 @@ class FastGPTClient:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
-        self._client = client or httpx.AsyncClient(base_url=self._base_url)
+        self._client = client or httpx.AsyncClient()
         self._owns_client = client is None
 
     def __repr__(self) -> str:
@@ -137,8 +163,7 @@ class FastGPTClient:
             if value is not None and value.strip():
                 payload[field] = value
         data = await self._request("POST", "/api/core/dataset/create", json=payload)
-        data_object = _object(data)
-        return DatasetRef(_required_string(data_object, "id", "datasetId", "_id"))
+        return DatasetRef(_required_nonempty_string(data))
 
     async def delete_dataset(self, dataset_id: str) -> None:
         await self._request("DELETE", "/api/core/dataset/delete", params={"id": dataset_id})
@@ -146,7 +171,7 @@ class FastGPTClient:
     async def create_file_collection(
         self, dataset_id: str, filename: str, content: bytes, config: Mapping[str, Any]
     ) -> CollectionRef:
-        data = _protected_config(config, datasetId=dataset_id, name=filename)
+        data = _protected_config(config, datasetId=dataset_id)
         response_data = await self._request(
             "POST",
             "/api/core/dataset/collection/create/localFile",
@@ -174,19 +199,19 @@ class FastGPTClient:
     async def list_collection_data(
         self, collection_id: str, page_size: int = 30
     ) -> list[ProcessedChunk]:
-        if not 1 <= page_size <= 30:
+        if type(page_size) is not int or not 1 <= page_size <= 30:
             raise ValueError("page_size must be between 1 and 30")
         data = await self._request(
             "POST",
             "/api/core/dataset/data/v2/list",
-            json={"collectionId": collection_id, "pageNum": 1, "pageSize": page_size},
+            json={"collectionId": collection_id, "offset": 0, "pageSize": page_size, "searchText": ""},
         )
         items = _list(_object(data).get("list"))
         return [
             ProcessedChunk(
                 chunk_id=_required_string(_object(item), "id", "_id"),
-                q=_required_string(_object(item), "q"),
-                a=_required_string(_object(item), "a"),
+                q=_required_text(_object(item), "q"),
+                a=_required_text(_object(item), "a"),
             )
             for item in items
         ]
@@ -205,26 +230,28 @@ class FastGPTClient:
             if request.extension_model is not None and request.extension_model.strip():
                 payload["datasetSearchExtensionModel"] = request.extension_model
             if request.extension_background:
-                payload["datasetSearchExtensionModelBackground"] = request.extension_background
+                payload["datasetSearchExtensionBg"] = request.extension_background
         data = _list(await self._request("POST", "/api/core/dataset/searchTest", json=payload))
         return [
             RetrievedChunk(
                 chunk_id=_required_string(_object(item), "id", "_id"),
                 collection_id=_required_string(_object(item), "collectionId"),
                 source_name=_required_string(_object(item), "sourceName"),
-                q=_required_string(_object(item), "q"),
-                a=_required_string(_object(item), "a"),
+                q=_required_text(_object(item), "q"),
+                a=_required_text(_object(item), "a"),
                 score=_required_number(_object(item), "score"),
             )
             for item in data
         ]
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        if self._client.is_closed:
+            raise _failure("client_closed", "FastGPT client is closed.")
         failure_category: str | None = None
         try:
             response = await self._client.request(
                 method,
-                path if self._owns_client else f"{self._base_url}{path}",
+                f"{self._base_url}{path}",
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 **kwargs,
             )
@@ -245,7 +272,7 @@ class FastGPTClient:
             raise _failure("invalid_json", "FastGPT returned invalid JSON.")
         if not isinstance(payload, dict):
             raise _failure("malformed_response", "FastGPT returned a malformed response.")
-        if payload.get("code") != 200:
+        if type(payload.get("code")) is not int or payload["code"] != 200:
             raise _failure("service_rejected", "FastGPT reported an unsuccessful result.")
         return payload.get("data")
 
@@ -258,15 +285,12 @@ def _protected_config(config: Mapping[str, Any], **required_fields: Any) -> dict
 
 def _collection_ref(data: Any) -> CollectionRef:
     data_object = _object(data)
-    inserted_count = data_object.get("insertLen", data_object.get("insertedCount"))
-    if (
-        isinstance(inserted_count, bool)
-        or not isinstance(inserted_count, int)
-        or inserted_count < 0
-    ):
+    results = _object(data_object.get("results"))
+    inserted_count = results.get("insertLen")
+    if type(inserted_count) is not int or inserted_count < 0:
         _malformed()
     return CollectionRef(
-        collection_id=_required_string(data_object, "collectionId", "id", "_id"),
+        collection_id=_required_string(data_object, "collectionId"),
         inserted_count=inserted_count,
     )
 
@@ -286,14 +310,31 @@ def _list(value: Any) -> list[Any]:
 def _required_string(data: dict[str, Any], *keys: str) -> str:
     for key in keys:
         value = data.get(key)
-        if isinstance(value, str):
+        if isinstance(value, str) and value.strip():
             return value
+    _malformed()
+
+
+def _required_nonempty_string(value: Any) -> str:
+    if isinstance(value, str) and value.strip():
+        return value
+    _malformed()
+
+
+def _required_text(data: dict[str, Any], key: str) -> str:
+    value = data.get(key)
+    if isinstance(value, str):
+        return value
     _malformed()
 
 
 def _required_number(data: dict[str, Any], key: str) -> float:
     value = data.get(key)
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+    ):
         _malformed()
     return float(value)
 
@@ -304,3 +345,10 @@ def _malformed() -> None:
 
 def _failure(category: str, safe_message: str) -> ExternalServiceError:
     return ExternalServiceError(service="fastgpt", category=category, safe_message=safe_message)
+
+
+def _validate_nonempty_string(value: object, name: str) -> None:
+    if type(value) is not str:
+        raise TypeError(f"{name} must be a str")
+    if not value.strip():
+        raise ValueError(f"{name} must not be blank")

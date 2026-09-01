@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -57,7 +58,7 @@ async def test_search_maps_fastgpt_results() -> None:
 @respx.mock
 async def test_create_dataset_maps_optional_models_and_omits_blank_models() -> None:
     route = respx.post("https://fastgpt.test/api/core/dataset/create").mock(
-        return_value=httpx.Response(200, json={"code": 200, "data": {"id": "dataset-1"}})
+        return_value=httpx.Response(200, json={"code": 200, "data": "dataset-1"})
     )
     client = FastGPTClient("https://fastgpt.test/", "secret")
 
@@ -100,7 +101,11 @@ async def test_delete_dataset_uses_encoded_query_parameter() -> None:
 async def test_create_file_collection_sends_file_and_protected_data_fields() -> None:
     route = respx.post("https://fastgpt.test/api/core/dataset/collection/create/localFile").mock(
         return_value=httpx.Response(
-            200, json={"code": 200, "data": {"collectionId": "collection-1", "insertLen": 2}}
+            200,
+            json={
+                "code": 200,
+                "data": {"collectionId": "collection-1", "results": {"insertLen": 2}},
+            },
         )
     )
     client = FastGPTClient("https://fastgpt.test", "secret")
@@ -109,7 +114,7 @@ async def test_create_file_collection_sends_file_and_protected_data_fields() -> 
         "dataset-1",
         "notes.pdf",
         b"document bytes",
-        {"chunkSize": 256, "datasetId": "wrong", "name": "wrong"},
+        {"chunkSize": 256, "datasetId": "wrong"},
     )
 
     assert collection.collection_id == "collection-1"
@@ -119,7 +124,7 @@ async def test_create_file_collection_sends_file_and_protected_data_fields() -> 
     assert b'name="file"; filename="notes.pdf"' in request.content
     assert b"document bytes" in request.content
     assert b'"datasetId": "dataset-1"' in request.content
-    assert b'"name": "notes.pdf"' in request.content
+    assert b'"name"' not in request.content
     assert b'"chunkSize": 256' in request.content
     assert b'"wrong"' not in request.content
     await client.aclose()
@@ -130,7 +135,11 @@ async def test_create_file_collection_sends_file_and_protected_data_fields() -> 
 async def test_create_text_collection_preserves_config_but_protects_required_fields() -> None:
     route = respx.post("https://fastgpt.test/api/core/dataset/collection/create/text").mock(
         return_value=httpx.Response(
-            200, json={"code": 200, "data": {"id": "collection-1", "insertLen": 1}}
+            200,
+            json={
+                "code": 200,
+                "data": {"collectionId": "collection-1", "results": {"insertLen": 1}},
+            },
         )
     )
     client = FastGPTClient("https://fastgpt.test", "secret")
@@ -188,8 +197,9 @@ async def test_list_collection_data_maps_processed_chunks() -> None:
     assert chunks[0].a == "Answer"
     assert _request_json(route.calls.last.request) == {
         "collectionId": "collection-1",
-        "pageNum": 1,
+        "offset": 0,
         "pageSize": 12,
+        "searchText": "",
     }
     await client.aclose()
 
@@ -237,7 +247,7 @@ async def test_search_maps_all_fastgpt_request_fields_when_extension_is_enabled(
         "usingReRank": True,
         "datasetSearchUsingExtensionQuery": True,
         "datasetSearchExtensionModel": "gpt-4o-mini",
-        "datasetSearchExtensionModelBackground": "statistics",
+        "datasetSearchExtensionBg": "statistics",
     }
     await client.aclose()
 
@@ -391,9 +401,10 @@ async def test_response_errors_do_not_expose_sensitive_response_state(
     "data",
     [
         {"collectionId": "collection-1"},
-        {"collectionId": "collection-1", "insertLen": "1"},
-        {"collectionId": "collection-1", "insertLen": -1},
-        {"collectionId": "collection-1", "insertedCount": True},
+        {"collectionId": "collection-1", "results": {}},
+        {"collectionId": "collection-1", "results": {"insertLen": "1"}},
+        {"collectionId": "collection-1", "results": {"insertLen": -1}},
+        {"collectionId": "collection-1", "results": {"insertLen": True}},
     ],
 )
 async def test_collection_result_requires_non_negative_integer_insert_count(
@@ -422,10 +433,14 @@ async def test_collection_result_requires_non_negative_integer_insert_count(
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_collection_result_accepts_inserted_count_alias() -> None:
+async def test_collection_result_maps_nested_insert_count() -> None:
     respx.post("https://fastgpt.test/api/core/dataset/collection/create/text").mock(
         return_value=httpx.Response(
-            200, json={"code": 200, "data": {"collectionId": "collection-1", "insertedCount": 3}}
+            200,
+            json={
+                "code": 200,
+                "data": {"collectionId": "collection-1", "results": {"insertLen": 3}},
+            },
         )
     )
     client = FastGPTClient("https://fastgpt.test", "secret")
@@ -433,6 +448,216 @@ async def test_collection_result_accepts_inserted_count_alias() -> None:
     collection = await client.create_text_collection("dataset-1", "notes", "content", {})
 
     assert collection.inserted_count == 3
+    await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"dataset_id": " ", "text": "question"},
+        {"dataset_id": "dataset-1", "text": " "},
+        {"dataset_id": "dataset-1", "text": "question", "limit": True},
+        {"dataset_id": "dataset-1", "text": "question", "limit": 0},
+        {"dataset_id": "dataset-1", "text": "question", "limit": 20_001},
+        {"dataset_id": "dataset-1", "text": "question", "similarity": True},
+        {"dataset_id": "dataset-1", "text": "question", "similarity": float("nan")},
+        {"dataset_id": "dataset-1", "text": "question", "similarity": 1.1},
+        {"dataset_id": "dataset-1", "text": "question", "search_mode": "unknown"},
+        {"dataset_id": "dataset-1", "text": "question", "using_rerank": 1},
+        {"dataset_id": "dataset-1", "text": "question", "extension_query": 0},
+        {"dataset_id": "dataset-1", "text": "question", "extension_query": True},
+        {
+            "dataset_id": "dataset-1",
+            "text": "question",
+            "extension_query": True,
+            "extension_model": " ",
+        },
+        {
+            "dataset_id": "dataset-1",
+            "text": "question",
+            "extension_background": None,
+        },
+    ],
+)
+def test_search_request_rejects_invalid_values(kwargs: dict[str, object]) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        SearchRequest(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_list_collection_data_rejects_boolean_page_size() -> None:
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises((TypeError, ValueError)):
+        await client.list_collection_data("collection-1", page_size=True)
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("code", [True, 200.0])
+async def test_fastgpt_rejects_non_integer_success_codes(code: object) -> None:
+    respx.post("https://fastgpt.test/api/core/dataset/create").mock(
+        return_value=httpx.Response(200, json={"code": code, "data": "dataset-1"})
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.create_dataset("Statistics")
+
+    assert caught.value.category == "service_rejected"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    "endpoint, payload, invoke",
+    [
+        (
+            "/api/core/dataset/create",
+            {"code": 200, "data": ""},
+            "dataset",
+        ),
+        (
+            "/api/core/dataset/collection/create/text",
+            {"code": 200, "data": {"collectionId": "", "results": {"insertLen": 1}}},
+            "collection",
+        ),
+        (
+            "/api/core/dataset/data/v2/list",
+            {"code": 200, "data": {"list": [{"id": "", "q": "q", "a": "a"}]}},
+            "list",
+        ),
+    ],
+)
+async def test_fastgpt_rejects_empty_required_identifiers(
+    endpoint: str, payload: dict[str, object], invoke: str
+) -> None:
+    respx.post(f"https://fastgpt.test{endpoint}").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ExternalServiceError) as caught:
+        if invoke == "dataset":
+            await client.create_dataset("Statistics")
+        elif invoke == "collection":
+            await client.create_text_collection("dataset-1", "notes", "content", {})
+        else:
+            await client.list_collection_data("collection-1")
+
+    assert caught.value.category == "malformed_response"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("score", [True, float("nan"), float("inf"), float("-inf")])
+async def test_search_rejects_non_finite_or_boolean_scores(score: object) -> None:
+    respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(
+            200,
+            content=json.dumps(
+                {
+                    "code": 200,
+                    "data": [
+                        {
+                            "id": "chunk-1",
+                            "collectionId": "collection-1",
+                            "sourceName": "notes",
+                            "q": "q",
+                            "a": "a",
+                            "score": score,
+                        }
+                    ],
+                },
+                allow_nan=True,
+            ).encode(),
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.search(SearchRequest("dataset-1", "question"))
+
+    assert caught.value.category == "malformed_response"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("field", ["id", "collectionId", "sourceName"])
+async def test_search_rejects_empty_required_result_identifiers(field: str) -> None:
+    item = {
+        "id": "chunk-1",
+        "collectionId": "collection-1",
+        "sourceName": "notes",
+        "q": "q",
+        "a": "a",
+        "score": 0.9,
+    }
+    item[field] = " "
+    respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(200, json={"code": 200, "data": [item]})
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.search(SearchRequest("dataset-1", "question"))
+
+    assert caught.value.category == "malformed_response"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_base_url_path_prefix_is_preserved() -> None:
+    route = respx.post("https://fastgpt.test/prefix/api/core/dataset/create").mock(
+        return_value=httpx.Response(200, json={"code": 200, "data": "dataset-1"})
+    )
+    client = FastGPTClient("https://fastgpt.test/prefix/", "secret")
+
+    await client.create_dataset("Statistics")
+
+    assert route.called
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_client_context_manager_repeated_close_and_reuse_failure() -> None:
+    route = respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(200, json={"code": 200, "data": []})
+    )
+    async with FastGPTClient("https://fastgpt.test", "secret") as client:
+        assert not client.is_closed
+
+    assert client.is_closed
+    await client.aclose()
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.search(SearchRequest("dataset-1", "question"))
+    assert caught.value.category == "client_closed"
+    assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_client_supports_concurrent_searches() -> None:
+    route = respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(200, json={"code": 200, "data": []})
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    first, second = await asyncio.gather(
+        client.search(SearchRequest("dataset-1", "first")),
+        client.search(SearchRequest("dataset-1", "second")),
+    )
+
+    assert first == []
+    assert second == []
+    assert route.call_count == 2
     await client.aclose()
 
 

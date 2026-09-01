@@ -12,13 +12,19 @@ from grounded_tutor.adapters.fastgpt import RetrievedChunk
 @dataclass(frozen=True, slots=True)
 class GeneratedClaim:
     text: str
-    chunk_ids: list[str]
+    chunk_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "chunk_ids", tuple(self.chunk_ids))
 
 
 @dataclass(frozen=True, slots=True)
 class GeneratedAnswer:
     answer: str
-    claims: list[GeneratedClaim]
+    claims: tuple[GeneratedClaim, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "claims", tuple(self.claims))
 
 
 class GenerationPort(Protocol):
