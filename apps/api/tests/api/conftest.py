@@ -1,0 +1,66 @@
+from collections.abc import Callable, Generator
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+import grounded_tutor.main as main_module
+from alembic import command
+from grounded_tutor.adapters.fakes import FakeFastGPT
+from grounded_tutor.alembic_config import get_alembic_config
+from grounded_tutor.config import Settings
+from grounded_tutor.db import create_database_engine, create_session_factory, get_session
+from grounded_tutor.dependencies import get_fastgpt
+from grounded_tutor.domain.models import Workspace
+
+
+@pytest.fixture
+def fake_fastgpt() -> FakeFastGPT:
+    return FakeFastGPT()
+
+
+@pytest.fixture
+def api_engine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    database_url = f"sqlite:///{tmp_path / 'api-test.db'}"
+    command.upgrade(get_alembic_config(Settings(database_url=database_url)), "head")
+    engine = create_database_engine(Settings(database_url=database_url))
+    monkeypatch.setattr(main_module, "engine", engine)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def api_session_factory(api_engine) -> Callable[[], object]:
+    return create_session_factory(api_engine)
+
+
+@pytest.fixture
+def client(
+    api_session_factory: Callable[[], object], fake_fastgpt: FakeFastGPT
+) -> Generator[TestClient]:
+    def get_test_session() -> Generator:
+        session = api_session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    main_module.app.dependency_overrides[get_session] = get_test_session
+    main_module.app.dependency_overrides[get_fastgpt] = lambda: fake_fastgpt
+    try:
+        with TestClient(main_module.app) as test_client:
+            yield test_client
+    finally:
+        main_module.app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def seeded_workspace(api_session_factory: Callable[[], object]) -> Workspace:
+    with api_session_factory() as session:
+        workspace = Workspace(title="Intro Statistics", dataset_id="dataset-seeded")
+        session.add(workspace)
+        session.commit()
+        session.refresh(workspace)
+        return workspace
