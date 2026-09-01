@@ -7,17 +7,20 @@ from typing import Literal
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+API_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATABASE_URL = f"sqlite:///{API_ROOT / 'grounded_tutor.db'}"
+
 
 class Settings(BaseSettings):
     """Runtime configuration loaded from the API-local .env file when present."""
 
     model_config = SettingsConfigDict(
-        env_file=Path(__file__).resolve().parents[2] / ".env",
+        env_file=API_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    database_url: str = "sqlite:///./grounded_tutor.db"
+    database_url: str = DEFAULT_DATABASE_URL
     fastgpt_base_url: str = "http://localhost:3000"
     fastgpt_api_key: SecretStr = SecretStr("")
     llm_base_url: str = "http://localhost:11434/v1"
