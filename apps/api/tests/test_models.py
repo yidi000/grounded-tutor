@@ -183,14 +183,17 @@ def test_lifespan_requires_a_current_database(
         pass
 
 
-def test_get_session_rolls_back_and_closes_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_get_session_rolls_back_and_closes_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     session = Mock(spec=Session)
     monkeypatch.setattr(db_module, "SessionLocal", Mock(return_value=session))
     sessions = db_module.get_session()
 
-    assert next(sessions) is session
+    assert await anext(sessions) is session
     with pytest.raises(RuntimeError, match="boom"):
-        sessions.throw(RuntimeError("boom"))
+        await sessions.athrow(RuntimeError("boom"))
 
     session.rollback.assert_called_once_with()
     session.close.assert_called_once_with()

@@ -40,7 +40,7 @@ def api_session_factory(api_engine) -> Callable[[], object]:
 def client(
     api_session_factory: Callable[[], object], fake_fastgpt: FakeFastGPT
 ) -> Generator[TestClient]:
-    def get_test_session() -> Generator:
+    async def get_test_session():
         session = api_session_factory()
         try:
             yield session

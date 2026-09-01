@@ -11,7 +11,9 @@ from grounded_tutor.config import get_settings
 from grounded_tutor.db import engine, ensure_database_is_current
 from grounded_tutor.middleware import PreviewRequestBodyLimitMiddleware
 from grounded_tutor.routers.previews import router as previews_router
+from grounded_tutor.routers.sources import router as sources_router
 from grounded_tutor.routers.workspaces import router as workspaces_router
+from grounded_tutor.services.source_locks import WorkspaceLockRegistry
 
 
 @asynccontextmanager
@@ -27,6 +29,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     else:
         fastgpt = FakeFastGPT()
     application.state.fastgpt = fastgpt
+    application.state.source_locks = WorkspaceLockRegistry()
     try:
         yield
     finally:
@@ -41,6 +44,7 @@ app.add_middleware(
 )
 app.include_router(workspaces_router)
 app.include_router(previews_router)
+app.include_router(sources_router)
 
 
 @app.exception_handler(RequestValidationError)

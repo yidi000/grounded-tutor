@@ -42,6 +42,8 @@ class FakeFastGPT(FastGPTPort):
         self.set_collection_forbidden_calls: list[tuple[str, bool]] = []
         self.list_collection_data_calls: list[tuple[str, int]] = []
         self.search_calls: list[SearchRequest] = []
+        self.call_history: list[tuple[Any, ...]] = []
+        self.failures: dict[str, BaseException] = {}
         self._dataset_count = 0
         self._collection_count = 0
         self._chunk_count = 0
@@ -53,6 +55,7 @@ class FakeFastGPT(FastGPTPort):
         agent_model: str | None = None,
         vlm_model: str | None = None,
     ) -> DatasetRef:
+        self._record(("create_dataset", name))
         self._dataset_count += 1
         dataset = DatasetRef(f"dataset-{self._dataset_count}")
         self.datasets[dataset.dataset_id] = dataset
@@ -60,6 +63,7 @@ class FakeFastGPT(FastGPTPort):
         return dataset
 
     async def delete_dataset(self, dataset_id: str) -> None:
+        self._record(("delete_dataset", dataset_id))
         self.datasets.pop(dataset_id, None)
         for collection_id in [
             identifier
@@ -72,6 +76,7 @@ class FakeFastGPT(FastGPTPort):
     async def create_file_collection(
         self, dataset_id: str, filename: str, content: bytes, config: Mapping[str, Any]
     ) -> CollectionRef:
+        self._record(("create_file_collection", dataset_id, filename))
         self._require_dataset(dataset_id)
         self.create_file_collection_calls.append((dataset_id, filename, content, dict(config)))
         return self._create_collection(dataset_id, filename, content, config)
@@ -79,23 +84,27 @@ class FakeFastGPT(FastGPTPort):
     async def create_text_collection(
         self, dataset_id: str, name: str, text: str, config: Mapping[str, Any]
     ) -> CollectionRef:
+        self._record(("create_text_collection", dataset_id, name))
         self._require_dataset(dataset_id)
         self.create_text_collection_calls.append((dataset_id, name, text, dict(config)))
         return self._create_collection(dataset_id, name, text, config)
 
     async def set_collection_forbidden(self, collection_id: str, forbidden: bool) -> None:
+        self._record(("set_collection_forbidden", collection_id, forbidden))
         self.collections[collection_id].forbidden = forbidden
         self.set_collection_forbidden_calls.append((collection_id, forbidden))
 
     async def list_collection_data(
         self, collection_id: str, page_size: int = 30
     ) -> list[ProcessedChunk]:
+        self._record(("list_collection_data", collection_id, page_size))
         if type(page_size) is not int or not 1 <= page_size <= 30:
             raise ValueError("page_size must be between 1 and 30")
         self.list_collection_data_calls.append((collection_id, page_size))
         return self.collections[collection_id].chunks[:page_size]
 
     async def search(self, request: SearchRequest) -> list[RetrievedChunk]:
+        self._record(("search", request.dataset_id))
         self.search_calls.append(request)
         if self.search_results_override is not None:
             return list(self.search_results_override)
@@ -138,6 +147,12 @@ class FakeFastGPT(FastGPTPort):
     def _require_dataset(self, dataset_id: str) -> None:
         if dataset_id not in self.datasets:
             raise ValueError("dataset_id does not exist")
+
+    def _record(self, call: tuple[Any, ...]) -> None:
+        self.call_history.append(call)
+        error = self.failures.pop(str(call[0]), None)
+        if error is not None:
+            raise error
 
 
 class FakeGeneration(GenerationPort):

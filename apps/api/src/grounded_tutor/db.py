@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from alembic.runtime.migration import MigrationContext
@@ -50,7 +50,7 @@ engine = create_database_engine(settings)
 SessionLocal = create_session_factory(engine)
 
 
-def get_session() -> Generator[Session, None, None]:
+async def get_session() -> AsyncGenerator[Session, None]:
     """Yield a transaction-safe session for FastAPI dependencies."""
 
     session = SessionLocal()

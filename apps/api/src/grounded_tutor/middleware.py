@@ -74,9 +74,9 @@ class PreviewRequestBodyLimitMiddleware:
             return None
         path = scope.get("path", "")
         settings = self._settings_provider()
-        if path.endswith("/source-previews/file"):
+        if path.endswith(("/source-previews/file", "/sources/file")):
             content_limit = settings.max_upload_bytes
-        elif path.endswith("/source-previews/text"):
+        elif path.endswith(("/source-previews/text", "/sources/text")):
             content_limit = settings.max_preview_text_bytes
         else:
             return None
