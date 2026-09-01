@@ -111,6 +111,14 @@ class PreviewResponse(BaseModel):
     warnings: list[PreviewWarning]
 
 
+class ApiErrorDetail(BaseModel):
+    code: str
+
+
+class ApiErrorResponse(BaseModel):
+    detail: ApiErrorDetail
+
+
 class TextPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

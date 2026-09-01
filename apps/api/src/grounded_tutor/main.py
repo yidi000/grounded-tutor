@@ -9,6 +9,7 @@ from grounded_tutor.adapters.fakes import FakeFastGPT
 from grounded_tutor.adapters.fastgpt import FastGPTClient, FastGPTPort
 from grounded_tutor.config import get_settings
 from grounded_tutor.db import engine, ensure_database_is_current
+from grounded_tutor.middleware import PreviewRequestBodyLimitMiddleware
 from grounded_tutor.routers.previews import router as previews_router
 from grounded_tutor.routers.workspaces import router as workspaces_router
 
@@ -34,6 +35,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Grounded Tutor API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    PreviewRequestBodyLimitMiddleware,
+    settings_provider=get_settings,
+)
 app.include_router(workspaces_router)
 app.include_router(previews_router)
 

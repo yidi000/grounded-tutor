@@ -29,5 +29,8 @@ def get_preview_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> PreviewService:
     return PreviewService(
-        WorkspaceRepository(session), max_upload_bytes=settings.max_upload_bytes
+        WorkspaceRepository(session),
+        max_upload_bytes=settings.max_upload_bytes,
+        max_preview_text_bytes=settings.max_preview_text_bytes,
+        max_extracted_characters=settings.max_extracted_characters,
     )

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from grounded_tutor.dependencies import get_preview_service
 from grounded_tutor.domain.ingestion import (
+    ApiErrorResponse,
     ChunkSettings,
     PreviewResponse,
     TextPreviewRequest,
@@ -26,8 +27,23 @@ router = APIRouter(
     tags=["source previews"],
 )
 
+COMMON_ERROR_RESPONSES = {
+    404: {"model": ApiErrorResponse, "description": "Workspace not found."},
+    413: {"model": ApiErrorResponse, "description": "Preview resource limit exceeded."},
+    422: {"model": ApiErrorResponse, "description": "Preview input is invalid."},
+    500: {"model": ApiErrorResponse, "description": "Local persistence failed."},
+}
+FILE_ERROR_RESPONSES = {
+    **COMMON_ERROR_RESPONSES,
+    415: {"model": ApiErrorResponse, "description": "File type is unsupported."},
+}
 
-@router.post("/text", response_model=PreviewResponse)
+
+@router.post(
+    "/text",
+    response_model=PreviewResponse,
+    responses=COMMON_ERROR_RESPONSES,
+)
 def create_text_preview(
     workspace_id: str,
     payload: TextPreviewRequest,
@@ -48,7 +64,11 @@ def create_text_preview(
         _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
-@router.post("/file", response_model=PreviewResponse)
+@router.post(
+    "/file",
+    response_model=PreviewResponse,
+    responses=FILE_ERROR_RESPONSES,
+)
 def create_file_preview(
     workspace_id: str,
     service: Annotated[PreviewService, Depends(get_preview_service)],
@@ -89,6 +109,10 @@ def _parse_workspace_id(workspace_id: str) -> UUID:
 def _preview_error(error: PreviewError) -> NoReturn:
     status_code = {
         "file_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+        "text_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+        "source_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+        "source_work_limit_exceeded": status.HTTP_413_CONTENT_TOO_LARGE,
+        "unsafe_archive": status.HTTP_413_CONTENT_TOO_LARGE,
         "unsupported_file_type": status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
     }.get(error.code, status.HTTP_422_UNPROCESSABLE_CONTENT)
     _api_error(status_code, error.code)

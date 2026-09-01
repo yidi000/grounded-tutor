@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_ROOT = Path(__file__).resolve().parents[2]
@@ -27,8 +27,26 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = SecretStr("")
     llm_model: str = "gpt-4o-mini"
     external_mode: Literal["fake", "live"] = "fake"
-    max_upload_bytes: int = 20_000_000
+    max_upload_bytes: int = Field(default=20_000_000, gt=0)
+    max_preview_text_bytes: int = Field(default=20_000_000, gt=0)
+    max_extracted_characters: int = Field(default=40_000_000, gt=0)
     allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+
+    @field_validator(
+        "max_upload_bytes",
+        "max_preview_text_bytes",
+        "max_extracted_characters",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_resource_limits(cls, value: object) -> object:
+        if isinstance(value, bool):
+            # Pydantic validators must use ValueError so invalid settings are
+            # collected into a ValidationError instead of escaping directly.
+            raise ValueError(  # noqa: TRY004
+                "preview resource limits must be positive integers"
+            )
+        return value
 
 
 @lru_cache
