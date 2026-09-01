@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from grounded_tutor.adapters.fastgpt import FastGPTPort, ProcessedChunk
+from grounded_tutor.adapters.fastgpt import CollectionListItem, FastGPTPort, ProcessedChunk
 from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.domain.models import SourceType
 from grounded_tutor.domain.schemas import (
@@ -23,7 +24,23 @@ from grounded_tutor.services.previews import SUPPORTED_EXTENSIONS, PreviewError
 from grounded_tutor.services.source_locks import WorkspaceLockRegistry
 
 SAFE_INGESTION_ERROR = "Source ingestion failed."
+SAFE_DISABLE_UNCONFIRMED_ERROR = (
+    "Source ingestion failed; remote disable could not be confirmed."
+)
+SAFE_RECONCILIATION_INCOMPLETE_ERROR = (
+    "Source ingestion failed; remote reconciliation could not be completed."
+)
+SAFE_MULTIPLE_REMOTE_MATCHES_ERROR = (
+    "Source ingestion failed; multiple remote matches require review."
+)
 PROCESSED_PREVIEW_LIMIT = 30
+RECONCILIATION_PAGE_SIZE = 30
+MAX_RECONCILIATION_PAGES = 4
+RECONCILIATION_TIMEOUT_SECONDS = 5.0
+REMOTE_NAME_MAX_LENGTH = 255
+REMOTE_MARKER_PREFIX = "gt-src-"
+REMOTE_NAME_SEPARATOR = "--"
+MAX_PUBLIC_PROCESSED_FIELD_CHARS = 4_000
 
 
 class SourceWorkspaceNotFoundError(LookupError):
@@ -46,6 +63,12 @@ class ExternalSourceServiceError(RuntimeError):
 class SourceIngestionResult:
     source: SourceSummary
     processed_preview: ProcessedPreviewResponse
+
+
+@dataclass(frozen=True, slots=True)
+class ReconciliationResult:
+    collection_id: str | None
+    safe_error_message: str
 
 
 class SourceService:
@@ -78,8 +101,10 @@ class SourceService:
             name=name,
             source_type=SourceType.TEXT,
             settings=settings,
-            create_collection=lambda dataset_id, config: self._fastgpt.create_text_collection(
-                dataset_id, name, text, config
+            create_collection=lambda dataset_id, remote_name, config: (
+                self._fastgpt.create_text_collection(
+                    dataset_id, remote_name, text, config
+                )
             ),
         )
 
@@ -97,8 +122,10 @@ class SourceService:
             name=safe_name,
             source_type=SourceType.FILE,
             settings=settings,
-            create_collection=lambda dataset_id, config: self._fastgpt.create_file_collection(
-                dataset_id, safe_name, content, config
+            create_collection=lambda dataset_id, remote_name, config: (
+                self._fastgpt.create_file_collection(
+                    dataset_id, remote_name, content, config
+                )
             ),
         )
 
@@ -109,15 +136,19 @@ class SourceService:
         name: str,
         source_type: SourceType,
         settings: ChunkSettings,
-        create_collection: Callable[[str, dict[str, object]], Awaitable[object]],
+        create_collection: Callable[[str, str, dict[str, object]], Awaitable[object]],
     ) -> SourceIngestionResult:
         config = settings.model_dump(by_alias=True)
         source_id = uuid4()
+        marker = source_marker(source_id)
+        remote_name = _remote_collection_name(name, source_type, marker)
+        remote_config = {**config, "tags": [marker]}
         async with self._locks.acquire(workspace_id):
             dataset_id = self._repository.get_workspace_dataset_id(workspace_id)
             if dataset_id is None:
                 raise SourceWorkspaceNotFoundError
             collection_id: str | None = None
+            remote_create_started = False
             try:
                 source = self._repository.create_indexing(
                     source_id=source_id,
@@ -127,42 +158,185 @@ class SourceService:
                     origin_uri=None,
                     ingestion_config=config,
                 )
-                collection = await create_collection(dataset_id, config)
+                remote_create_started = True
+                collection = await create_collection(dataset_id, remote_name, remote_config)
                 collection_id = _collection_id(collection)
                 await self._fastgpt.set_collection_forbidden(collection_id, True)
+                await self._confirm_collection_forbidden(
+                    dataset_id=dataset_id,
+                    marker=marker,
+                    collection_id=collection_id,
+                )
                 self._repository.set_collection_id(source.id, collection_id=collection_id)
                 chunks = await self._fastgpt.list_collection_data(
                     collection_id, page_size=PROCESSED_PREVIEW_LIMIT
                 )
                 source = self._repository.transition_review(source.id)
             except asyncio.CancelledError:
-                await self._recover_failed_ingestion(source_id, collection_id, strict=False)
+                reconciliation = await self._reconcile_if_needed(
+                    dataset_id=dataset_id,
+                    marker=marker,
+                    known_collection_id=collection_id,
+                    remote_create_started=remote_create_started,
+                )
+                self._persist_failed_ingestion(
+                    source_id, reconciliation, strict=False
+                )
                 raise
             except SourcePersistenceError:
-                await self._recover_failed_ingestion(source_id, collection_id, strict=False)
+                reconciliation = await self._reconcile_if_needed(
+                    dataset_id=dataset_id,
+                    marker=marker,
+                    known_collection_id=collection_id,
+                    remote_create_started=remote_create_started,
+                )
+                self._persist_failed_ingestion(
+                    source_id, reconciliation, strict=False
+                )
                 raise
             except Exception as error:
-                await self._recover_failed_ingestion(source_id, collection_id, strict=True)
+                reconciliation = await self._reconcile_if_needed(
+                    dataset_id=dataset_id,
+                    marker=marker,
+                    known_collection_id=collection_id,
+                    remote_create_started=remote_create_started,
+                )
+                self._persist_failed_ingestion(source_id, reconciliation, strict=True)
                 raise ExternalSourceServiceError("Source ingestion failed.") from error
             return SourceIngestionResult(
                 source=source,
                 processed_preview=_processed_preview(source, chunks),
             )
 
-    async def _recover_failed_ingestion(
+    async def _confirm_collection_forbidden(
+        self,
+        *,
+        dataset_id: str,
+        marker: str,
+        collection_id: str,
+    ) -> None:
+        matches, complete = await self._find_marker_matches(dataset_id, marker)
+        if (
+            not complete
+            or len(matches) != 1
+            or matches[0].collection_id != collection_id
+            or not matches[0].forbidden
+        ):
+            raise ExternalSourceServiceError(
+                "Remote collection disable could not be confirmed."
+            )
+
+    async def _reconcile_if_needed(
+        self,
+        *,
+        dataset_id: str,
+        marker: str,
+        known_collection_id: str | None,
+        remote_create_started: bool,
+    ) -> ReconciliationResult:
+        if not remote_create_started:
+            return ReconciliationResult(None, SAFE_INGESTION_ERROR)
+        task = asyncio.create_task(
+            asyncio.wait_for(
+                self._reconcile_remote_collections(
+                    dataset_id=dataset_id,
+                    marker=marker,
+                    known_collection_id=known_collection_id,
+                ),
+                timeout=RECONCILIATION_TIMEOUT_SECONDS,
+            )
+        )
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            try:
+                return await task
+            except Exception:  # noqa: BLE001 - reconciliation is best effort.
+                return ReconciliationResult(
+                    known_collection_id, SAFE_RECONCILIATION_INCOMPLETE_ERROR
+                )
+        except Exception:  # noqa: BLE001 - reconciliation never exposes provider details.
+            return ReconciliationResult(
+                known_collection_id, SAFE_RECONCILIATION_INCOMPLETE_ERROR
+            )
+
+    async def _reconcile_remote_collections(
+        self,
+        *,
+        dataset_id: str,
+        marker: str,
+        known_collection_id: str | None,
+    ) -> ReconciliationResult:
+        listing_succeeded = True
+        listing_complete = False
+        matches: list[CollectionListItem] = []
+        try:
+            matches, listing_complete = await self._find_marker_matches(
+                dataset_id, marker
+            )
+        except Exception:  # noqa: BLE001 - update known IDs even if listing is unavailable.
+            listing_succeeded = False
+
+        candidates: dict[str, bool] = {
+            match.collection_id: match.forbidden for match in matches
+        }
+        if known_collection_id is not None:
+            candidates.setdefault(known_collection_id, False)
+
+        async def forbid(collection_id: str) -> tuple[str, bool]:
+            try:
+                await self._fastgpt.set_collection_forbidden(collection_id, True)
+                return collection_id, True
+            except Exception:  # noqa: BLE001 - every candidate remains isolated locally.
+                return collection_id, candidates[collection_id]
+
+        results = await asyncio.gather(*(forbid(item) for item in candidates))
+        confirmed = {collection_id for collection_id, success in results if success}
+        recovered_id = next(iter(candidates)) if len(candidates) == 1 else None
+        if len(candidates) > 1:
+            safe_message = SAFE_MULTIPLE_REMOTE_MATCHES_ERROR
+        elif not listing_succeeded or not listing_complete:
+            safe_message = SAFE_RECONCILIATION_INCOMPLETE_ERROR
+        elif candidates and len(confirmed) != len(candidates):
+            safe_message = SAFE_DISABLE_UNCONFIRMED_ERROR
+        else:
+            safe_message = SAFE_INGESTION_ERROR
+        return ReconciliationResult(recovered_id, safe_message)
+
+    async def _find_marker_matches(
+        self, dataset_id: str, marker: str
+    ) -> tuple[list[CollectionListItem], bool]:
+        matches: dict[str, CollectionListItem] = {}
+        offset = 0
+        for _ in range(MAX_RECONCILIATION_PAGES):
+            page = await self._fastgpt.list_collections(
+                dataset_id,
+                offset=offset,
+                page_size=RECONCILIATION_PAGE_SIZE,
+                search_text=marker,
+            )
+            for item in page.items:
+                if _has_exact_marker(item, marker):
+                    matches[item.collection_id] = item
+            offset += len(page.items)
+            if offset >= page.total:
+                return list(matches.values()), True
+            if not page.items:
+                return list(matches.values()), False
+        return list(matches.values()), False
+
+    def _persist_failed_ingestion(
         self,
         source_id: UUID,
-        collection_id: str | None,
+        reconciliation: ReconciliationResult,
         *,
         strict: bool,
     ) -> None:
-        if collection_id is not None:
-            await _best_effort_forbid(self._fastgpt, collection_id)
         try:
             failed = self._repository.transition_failed(
                 source_id,
-                collection_id=collection_id,
-                safe_error_message=SAFE_INGESTION_ERROR,
+                collection_id=reconciliation.collection_id,
+                safe_error_message=reconciliation.safe_error_message,
             )
             if failed is None and strict:
                 raise SourcePersistenceError(
@@ -202,17 +376,25 @@ def _collection_id(collection: object) -> str:
     return collection_id
 
 
-async def _best_effort_forbid(fastgpt: FastGPTPort, collection_id: str) -> None:
-    task = asyncio.create_task(fastgpt.set_collection_forbidden(collection_id, True))
-    try:
-        await asyncio.shield(task)
-    except asyncio.CancelledError:
-        try:
-            await task
-        except Exception:  # noqa: BLE001 - cleanup cannot expose remote details.
-            return
-    except Exception:  # noqa: BLE001 - cleanup remains best effort.
-        return
+def source_marker(source_id: UUID) -> str:
+    digest = hashlib.sha256(b"grounded-tutor-source-v1:" + source_id.bytes).hexdigest()[:32]
+    return f"{REMOTE_MARKER_PREFIX}{digest}"
+
+
+def _remote_collection_name(name: str, source_type: SourceType, marker: str) -> str:
+    prefix = f"{marker}{REMOTE_NAME_SEPARATOR}"
+    if source_type is SourceType.FILE:
+        path = Path(name)
+        suffix = path.suffix.lower()
+        available = REMOTE_NAME_MAX_LENGTH - len(prefix) - len(suffix)
+        return f"{prefix}{path.stem[:available]}{suffix}"
+    return f"{prefix}{name[: REMOTE_NAME_MAX_LENGTH - len(prefix)]}"
+
+
+def _has_exact_marker(item: CollectionListItem, marker: str) -> bool:
+    return marker in item.tags or item.name.startswith(
+        f"{marker}{REMOTE_NAME_SEPARATOR}"
+    )
 
 
 def _processed_preview(
@@ -222,10 +404,36 @@ def _processed_preview(
         source_id=source.id,
         source_name=source.name,
         items=[
-            ProcessedPreviewItemResponse(position=index, q=chunk.q, a=chunk.a)
+            _processed_preview_item(index, chunk)
             for index, chunk in enumerate(chunks[:PROCESSED_PREVIEW_LIMIT], start=1)
         ],
         limit=PROCESSED_PREVIEW_LIMIT,
+    )
+
+
+def _processed_preview_item(
+    position: int, chunk: ProcessedChunk
+) -> ProcessedPreviewItemResponse:
+    q, q_truncated = _public_preview_text(chunk.q)
+    a, a_truncated = _public_preview_text(chunk.a)
+    return ProcessedPreviewItemResponse(
+        position=position,
+        q=q,
+        a=a,
+        q_truncated=q_truncated,
+        a_truncated=a_truncated,
+    )
+
+
+def _public_preview_text(value: str) -> tuple[str, bool]:
+    sanitized = "".join(
+        character
+        for character in value
+        if character.isprintable() or character in {"\n", "\r", "\t"}
+    )
+    return (
+        sanitized[:MAX_PUBLIC_PROCESSED_FIELD_CHARS],
+        len(sanitized) > MAX_PUBLIC_PROCESSED_FIELD_CHARS,
     )
 
 

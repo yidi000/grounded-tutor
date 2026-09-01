@@ -62,6 +62,29 @@ Implement the phases in order. Each phase is independently demonstrable and ends
 - Use fake FastGPT and fake generation adapters in unit tests, browser tests, and pull-request CI.
 - Use real-service integration tests only when `RUN_LIVE_INTEGRATION=1` is explicitly set.
 
+### P0 ingestion safety boundary
+
+- Run the API through `make api-dev`, which fixes Uvicorn to one worker. The
+  per-Workspace ingestion lock is process-local; multi-worker or multi-instance
+  deployment is unsupported until it is replaced by a distributed lease.
+- Every Source attempt derives a stable opaque FastGPT marker from its local
+  Source UUID. The backend sends that marker as a Collection tag and in the
+  remote-only Collection name, then uses the official bounded `listV2` API to
+  reconcile uncertain create results. Tags are only an enhancement because
+  they may require a commercial FastGPT deployment; exact name-marker matching
+  is the baseline.
+- Remote reconciliation is best effort, not an atomic create-disabled
+  guarantee. If FastGPT list and update operations remain unavailable, the
+  local Source is `failed`; the remote Collection may still be enabled. The
+  Task 6 checkpoint is therefore not end-to-end query-safe by itself.
+- Foundation Task 8 must fail closed: ASK filters every retrieval result against
+  local `READY` Source Collection IDs. A remote Collection that is missing,
+  ambiguous, `review`, or `failed` locally must never reach generation even if
+  FastGPT still reports it in Dataset search results.
+- Source ingestion POSTs are not yet idempotent and clients must not retry them
+  automatically. A persistent `Idempotency-Key` contract plus a distributed
+  lock/lease is a required pre-public, multi-worker follow-up.
+
 ## Approved-spec coverage
 
 | Specification area | Implementation location |

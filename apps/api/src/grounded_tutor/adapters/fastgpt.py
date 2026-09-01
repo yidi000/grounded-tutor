@@ -23,6 +23,20 @@ class CollectionRef:
 
 
 @dataclass(frozen=True, slots=True)
+class CollectionListItem:
+    collection_id: str
+    name: str
+    tags: tuple[str, ...]
+    forbidden: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionPage:
+    items: tuple[CollectionListItem, ...]
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessedChunk:
     chunk_id: str
     q: str
@@ -95,6 +109,15 @@ class FastGPTPort(Protocol):
     ) -> CollectionRef: ...
 
     async def set_collection_forbidden(self, collection_id: str, forbidden: bool) -> None: ...
+
+    async def list_collections(
+        self,
+        dataset_id: str,
+        *,
+        offset: int = 0,
+        page_size: int = 30,
+        search_text: str = "",
+    ) -> CollectionPage: ...
 
     async def list_collection_data(
         self, collection_id: str, page_size: int = 30
@@ -193,6 +216,60 @@ class FastGPTClient:
             "/api/core/dataset/collection/update",
             json={"id": collection_id, "forbid": forbidden},
         )
+
+    async def list_collections(
+        self,
+        dataset_id: str,
+        *,
+        offset: int = 0,
+        page_size: int = 30,
+        search_text: str = "",
+    ) -> CollectionPage:
+        _validate_nonempty_string(dataset_id, "dataset_id")
+        if type(offset) is not int or not 0 <= offset <= 1_000_000:
+            raise ValueError("offset must be an integer between 0 and 1000000")
+        if type(page_size) is not int or not 1 <= page_size <= 30:
+            raise ValueError("page_size must be between 1 and 30")
+        if type(search_text) is not str or len(search_text) > 256:
+            raise ValueError("search_text must be a string of at most 256 characters")
+        data = _object(
+            await self._request(
+                "POST",
+                "/api/core/dataset/collection/listV2",
+                json={
+                    "offset": offset,
+                    "pageSize": page_size,
+                    "datasetId": dataset_id,
+                    "parentId": None,
+                    "searchText": search_text,
+                },
+            )
+        )
+        raw_items = _list(data.get("list"))
+        if len(raw_items) > page_size:
+            _malformed()
+        total = data.get("total")
+        if type(total) is not int or total < offset + len(raw_items):
+            _malformed()
+        items: list[CollectionListItem] = []
+        for raw_item in raw_items:
+            item = _object(raw_item)
+            name = _required_string(item, "name")
+            if len(name) > 2_048:
+                _malformed()
+            tags = _optional_string_list(item, "tags", max_items=100, max_length=256)
+            forbidden = item.get("forbid")
+            if type(forbidden) is not bool:
+                _malformed()
+            items.append(
+                CollectionListItem(
+                    collection_id=_required_string(item, "id", "_id"),
+                    name=name,
+                    tags=tags,
+                    forbidden=forbidden,
+                )
+            )
+        return CollectionPage(tuple(items), total)
 
     async def list_collection_data(
         self, collection_id: str, page_size: int = 30
@@ -335,6 +412,28 @@ def _required_number(data: dict[str, Any], key: str) -> float:
     ):
         _malformed()
     return float(value)
+
+
+def _optional_string_list(
+    data: dict[str, Any],
+    key: str,
+    *,
+    max_items: int,
+    max_length: int,
+) -> tuple[str, ...]:
+    if key not in data:
+        return ()
+    value = data.get(key)
+    if (
+        not isinstance(value, list)
+        or len(value) > max_items
+        or any(
+            not isinstance(item, str) or not item or len(item) > max_length
+            for item in value
+        )
+    ):
+        _malformed()
+    return tuple(value)
 
 
 def _malformed() -> None:

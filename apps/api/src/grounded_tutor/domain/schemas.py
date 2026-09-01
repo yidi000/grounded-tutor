@@ -100,6 +100,8 @@ class ProcessedPreviewItemResponse(BaseModel):
     position: int
     q: str
     a: str
+    q_truncated: bool = False
+    a_truncated: bool = False
 
 
 class ProcessedPreviewResponse(BaseModel):

@@ -114,9 +114,8 @@ class SourceRepository:
         values: dict[str, object] = {
             "status": SourceStatus.FAILED,
             "error_message": safe_error_message,
+            "collection_id": collection_id,
         }
-        if collection_id is not None:
-            values["collection_id"] = collection_id
         return self._update_optional(source_id, **values)
 
     def list_for_workspace(self, workspace_id: UUID) -> tuple[bool, list[SourceSummary]]:

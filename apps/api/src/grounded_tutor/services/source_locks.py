@@ -17,7 +17,12 @@ class _LockEntry:
 
 
 class WorkspaceLockRegistry:
-    """App-scoped, non-waiting ingestion exclusion keyed by Workspace."""
+    """App-scoped, non-waiting ingestion exclusion keyed by Workspace.
+
+    This is intentionally a single-process P0 primitive. The supported P0 run
+    command uses one Uvicorn worker. Multi-worker deployment requires a shared
+    distributed lease and an idempotency record before public release.
+    """
 
     def __init__(self) -> None:
         self._entries: dict[UUID, _LockEntry] = {}

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from grounded_tutor.adapters.fakes import FakeFastGPT
+from grounded_tutor.adapters.fakes import FakeCollection, FakeFastGPT
 from grounded_tutor.adapters.fastgpt import DatasetRef, ExternalServiceError
 from grounded_tutor.config import Settings
 from grounded_tutor.db import create_database_engine
@@ -19,7 +19,11 @@ from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.domain.models import Base, Source, SourceStatus, SourceType, Workspace
 from grounded_tutor.repositories.sources import SourceRepository
 from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError, WorkspaceLockRegistry
-from grounded_tutor.services.sources import ExternalSourceServiceError, SourceService
+from grounded_tutor.services.sources import (
+    ExternalSourceServiceError,
+    SourceService,
+    source_marker,
+)
 
 
 @pytest.fixture
@@ -76,9 +80,11 @@ async def test_new_collection_is_disabled_until_acceptance(source_context) -> No
     assert fake.list_collection_data_calls == [("collection-1", 30)]
     assert result.processed_preview.items[0].q == "Mean is an average."
     assert result.processed_preview.authority == "actual"
+    marker = source_marker(result.source.id)
     assert fake.call_history == [
-        ("create_text_collection", "dataset-statistics", "week-1"),
+        ("create_text_collection", "dataset-statistics", f"{marker}--week-1"),
         ("set_collection_forbidden", "collection-1", True),
+        ("list_collections", "dataset-statistics", 0, 30, marker),
         ("list_collection_data", "collection-1", 30),
     ]
 
@@ -109,15 +115,17 @@ async def test_file_ingestion_forwards_original_bytes_and_canonical_config(sourc
     )
 
     dataset_id, filename, sent_content, config = fake.create_file_collection_calls[0]
+    marker = source_marker(result.source.id)
     assert (dataset_id, filename, sent_content) == (
         "dataset-statistics",
-        "course.pdf",
+        f"{marker}--course.pdf",
         content,
     )
-    assert config == settings.model_dump(by_alias=True)
+    assert config == {**settings.model_dump(by_alias=True), "tags": [marker]}
     assert "datasetId" not in config
     assert "collectionId" not in config
-    assert result.source.ingestion_config == config
+    assert result.source.ingestion_config == settings.model_dump(by_alias=True)
+    assert result.source.name == "course.pdf"
 
 
 @pytest.mark.asyncio
@@ -560,3 +568,392 @@ async def test_failed_transition_db_error_does_not_expose_external_error(source_
     assert caught.type.__name__ == "SourcePersistenceError"
     assert "private" not in str(caught.value)
     assert fake.collections == {}
+
+
+@pytest.mark.asyncio
+async def test_remote_create_then_timeout_reconciles_enabled_orphan(source_engine) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class CommitThenTimeout(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            await super().create_text_collection(dataset_id, name, text, config)
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="timeout",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake = CommitThenTimeout()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    assert len(fake.collections) == 1
+    remote = next(iter(fake.collections.values()))
+    assert remote.forbidden is True
+    with Session(source_engine) as check:
+        source = check.scalar(select(Source))
+    assert source is not None
+    assert source.status is SourceStatus.FAILED
+    assert source.collection_id is not None
+    assert source.name == "notes"
+
+
+@pytest.mark.asyncio
+async def test_remote_create_then_cancellation_reconciles_enabled_orphan(source_engine) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    committed = asyncio.Event()
+
+    class CommitThenBlock(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            await super().create_text_collection(dataset_id, name, text, config)
+            committed.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    fake = CommitThenBlock()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        task = asyncio.create_task(
+            service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+        )
+        await asyncio.wait_for(committed.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        session.close()
+
+    assert len(fake.collections) == 1
+    assert next(iter(fake.collections.values())).forbidden is True
+    with Session(source_engine) as check:
+        source = check.scalar(select(Source))
+    assert source is not None
+    assert source.status is SourceStatus.FAILED
+    assert source.collection_id is not None
+
+
+@pytest.mark.asyncio
+async def test_name_marker_recovers_when_collection_tags_are_omitted(source_engine) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class CommitThenMalformed(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            await super().create_text_collection(dataset_id, name, text, config)
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="malformed_response",
+                safe_message="FastGPT returned a malformed response.",
+            )
+
+    fake = CommitThenMalformed()
+    fake.supports_tags = False
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    remote = next(iter(fake.collections.values()))
+    assert remote.tags == ()
+    assert remote.forbidden is True
+    with Session(source_engine) as check:
+        source = check.scalar(select(Source))
+    assert source is not None
+    assert source.collection_id == "collection-1"
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_ignores_wrong_dataset_and_near_marker_matches(
+    source_engine,
+) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class AddsDecoysThenTimesOut(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            ref = await super().create_text_collection(dataset_id, name, text, config)
+            marker = name.split("--", maxsplit=1)[0]
+            self.collections["near-match"] = FakeCollection(
+                dataset_id=dataset_id,
+                name=f"{marker}x--near",
+                content="near",
+                config={},
+                chunks=[],
+                tags=(f"{marker}x",),
+            )
+            self.collections["wrong-dataset"] = FakeCollection(
+                dataset_id="dataset-other",
+                name=name,
+                content="wrong",
+                config={},
+                chunks=[],
+                tags=(marker,),
+            )
+            assert ref.collection_id == "collection-1"
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="timeout",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake = AddsDecoysThenTimesOut()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    fake.datasets["dataset-other"] = DatasetRef("dataset-other")
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    assert fake.collections["collection-1"].forbidden is True
+    assert fake.collections["near-match"].forbidden is False
+    assert fake.collections["wrong-dataset"].forbidden is False
+    assert all(
+        call[0] == "dataset-statistics" for call in fake.list_collections_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_multiple_exact_matches_are_all_disabled_and_local_id_is_ambiguous(
+    source_engine,
+) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class DuplicatesThenTimesOut(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            await super().create_text_collection(dataset_id, name, text, config)
+            marker = name.split("--", maxsplit=1)[0]
+            self.collections["collection-duplicate"] = FakeCollection(
+                dataset_id=dataset_id,
+                name=f"{marker}--duplicate",
+                content="duplicate",
+                config=dict(config),
+                chunks=[],
+                tags=(marker,),
+            )
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="timeout",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake = DuplicatesThenTimesOut()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    assert fake.collections["collection-1"].forbidden is True
+    assert fake.collections["collection-duplicate"].forbidden is True
+    with Session(source_engine) as check:
+        source = check.scalar(select(Source))
+    assert source is not None
+    assert source.status is SourceStatus.FAILED
+    assert source.collection_id is None
+    assert source.error_message == (
+        "Source ingestion failed; multiple remote matches require review."
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_paginates_to_exact_match(source_engine) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class PaginatesThenTimesOut(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            marker = name.split("--", maxsplit=1)[0]
+            for index in range(30):
+                self.collections[f"near-{index}"] = FakeCollection(
+                    dataset_id=dataset_id,
+                    name=f"{marker}x--near-{index}",
+                    content="near",
+                    config={},
+                    chunks=[],
+                )
+            await super().create_text_collection(dataset_id, name, text, config)
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="timeout",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake = PaginatesThenTimesOut()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    assert fake.list_collections_calls == [
+        ("dataset-statistics", 0, 30, fake.list_collections_calls[0][3]),
+        ("dataset-statistics", 30, 30, fake.list_collections_calls[0][3]),
+    ]
+    assert fake.collections["collection-1"].forbidden is True
+
+
+@pytest.mark.asyncio
+async def test_persistent_list_outage_fails_locally_without_claiming_remote_disable(
+    source_engine,
+) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class CommitThenTimeoutWithListOutage(FakeFastGPT):
+        async def create_text_collection(self, dataset_id, name, text, config):
+            await super().create_text_collection(dataset_id, name, text, config)
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="timeout",
+                safe_message="FastGPT request failed.",
+            )
+
+        async def list_collections(self, *args, **kwargs):
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="network",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake = CommitThenTimeoutWithListOutage()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    assert fake.collections["collection-1"].forbidden is False
+    with Session(source_engine) as check:
+        source = check.scalar(select(Source))
+    assert source is not None
+    assert source.status is SourceStatus.FAILED
+    assert source.collection_id is None
+    assert source.error_message == (
+        "Source ingestion failed; remote reconciliation could not be completed."
+    )
+
+
+@pytest.mark.asyncio
+async def test_persistent_forbid_failure_never_transitions_to_review(source_engine) -> None:
+    with Session(source_engine, expire_on_commit=False) as setup:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        setup.add(workspace)
+        setup.commit()
+        setup.refresh(workspace)
+
+    class ForbidOutage(FakeFastGPT):
+        async def set_collection_forbidden(self, collection_id, forbidden):
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="network",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake = ForbidOutage()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    session = Session(source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError):
+            await service.ingest_text(
+                workspace_id=workspace.id,
+                name="notes",
+                text="Mean.",
+                settings=ChunkSettings(),
+            )
+    finally:
+        session.close()
+
+    assert fake.collections["collection-1"].forbidden is False
+    with Session(source_engine) as check:
+        source = check.scalar(select(Source))
+    assert source is not None
+    assert source.status is SourceStatus.FAILED
+    assert source.collection_id == "collection-1"
+    assert source.error_message == (
+        "Source ingestion failed; remote disable could not be confirmed."
+    )

@@ -6,6 +6,7 @@ import pytest
 import respx
 
 from grounded_tutor.adapters.fastgpt import (
+    CollectionPage,
     ExternalServiceError,
     FastGPTClient,
     SearchRequest,
@@ -680,6 +681,148 @@ async def test_client_supports_concurrent_searches() -> None:
 
 def _request_json(request: httpx.Request) -> object:
     return json.loads(request.content)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_collections_maps_official_list_v2_page() -> None:
+    route = respx.post(
+        "https://fastgpt.test/api/core/dataset/collection/listV2"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": 200,
+                "data": {
+                    "list": [
+                        {
+                            "_id": "collection-1",
+                            "name": "gt-src-marker--notes",
+                            "tags": ["gt-src-marker"],
+                            "forbid": True,
+                        }
+                    ],
+                    "total": 31,
+                },
+            },
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    page = await client.list_collections(
+        "dataset-1", offset=30, page_size=30, search_text="gt-src-marker"
+    )
+
+    assert isinstance(page, CollectionPage)
+    assert page.total == 31
+    assert page.items[0].collection_id == "collection-1"
+    assert page.items[0].name == "gt-src-marker--notes"
+    assert page.items[0].tags == ("gt-src-marker",)
+    assert page.items[0].forbidden is True
+    assert _request_json(route.calls.last.request) == {
+        "offset": 30,
+        "pageSize": 30,
+        "datasetId": "dataset-1",
+        "parentId": None,
+        "searchText": "gt-src-marker",
+    }
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_collections_rejects_invalid_bounds_before_network() -> None:
+    route = respx.post(
+        "https://fastgpt.test/api/core/dataset/collection/listV2"
+    ).mock(return_value=httpx.Response(200, json={"code": 200, "data": {}}))
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ValueError, match="page_size"):
+        await client.list_collections("dataset-1", offset=0, page_size=31)
+    with pytest.raises(ValueError, match="offset"):
+        await client.list_collections("dataset-1", offset=-1, page_size=30)
+
+    assert not route.called
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_collections_treats_omitted_commercial_tags_as_empty() -> None:
+    route = respx.post(
+        "https://fastgpt.test/api/core/dataset/collection/listV2"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": 200,
+                "data": {
+                    "list": [
+                        {
+                            "_id": "collection-1",
+                            "name": "gt-src-marker--notes",
+                            "forbid": False,
+                        }
+                    ],
+                    "total": 1,
+                },
+            },
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    page = await client.list_collections(
+        "dataset-1", search_text="gt-src-marker"
+    )
+
+    assert route.called
+    assert page.items[0].tags == ()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_collections_rejects_oversized_or_malformed_page() -> None:
+    oversized_items = [
+        {"_id": f"collection-{index}", "name": "name", "tags": [], "forbid": False}
+        for index in range(31)
+    ]
+    route = respx.post(
+        "https://fastgpt.test/api/core/dataset/collection/listV2"
+    ).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={"code": 200, "data": {"list": oversized_items, "total": 31}},
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "code": 200,
+                    "data": {
+                        "list": [
+                            {
+                                "_id": "collection-1",
+                                "name": "name",
+                                "tags": "not-a-list",
+                                "forbid": False,
+                            }
+                        ],
+                        "total": 1,
+                    },
+                },
+            ),
+        ]
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    for _ in range(2):
+        with pytest.raises(ExternalServiceError) as caught:
+            await client.list_collections("dataset-1", offset=0, page_size=30)
+        assert caught.value.category == "malformed_response"
+
+    assert route.call_count == 2
+    await client.aclose()
 
 
 def _assert_exception_surface_redacted(error: BaseException, *markers: str) -> None:

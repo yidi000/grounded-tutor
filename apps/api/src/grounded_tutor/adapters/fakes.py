@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from grounded_tutor.adapters.fastgpt import (
+    CollectionListItem,
+    CollectionPage,
     CollectionRef,
     DatasetRef,
     FastGPTPort,
@@ -24,6 +26,7 @@ class FakeCollection:
     content: bytes | str
     config: dict[str, Any]
     chunks: list[ProcessedChunk]
+    tags: tuple[str, ...] = ()
     forbidden: bool = False
 
 
@@ -42,11 +45,13 @@ class FakeFastGPT(FastGPTPort):
         self.set_collection_forbidden_calls: list[tuple[str, bool]] = []
         self.list_collection_data_calls: list[tuple[str, int]] = []
         self.search_calls: list[SearchRequest] = []
+        self.list_collections_calls: list[tuple[str, int, int, str]] = []
         self.call_history: list[tuple[Any, ...]] = []
         self.failures: dict[str, BaseException] = {}
         self._dataset_count = 0
         self._collection_count = 0
         self._chunk_count = 0
+        self.supports_tags = True
 
     async def create_dataset(
         self,
@@ -93,6 +98,38 @@ class FakeFastGPT(FastGPTPort):
         self._record(("set_collection_forbidden", collection_id, forbidden))
         self.collections[collection_id].forbidden = forbidden
         self.set_collection_forbidden_calls.append((collection_id, forbidden))
+
+    async def list_collections(
+        self,
+        dataset_id: str,
+        *,
+        offset: int = 0,
+        page_size: int = 30,
+        search_text: str = "",
+    ) -> CollectionPage:
+        if type(offset) is not int or offset < 0:
+            raise ValueError("offset must be non-negative")
+        if type(page_size) is not int or not 1 <= page_size <= 30:
+            raise ValueError("page_size must be between 1 and 30")
+        self._record(("list_collections", dataset_id, offset, page_size, search_text))
+        self.list_collections_calls.append((dataset_id, offset, page_size, search_text))
+        normalized_search = search_text.casefold()
+        matches = [
+            CollectionListItem(
+                collection_id=collection_id,
+                name=collection.name,
+                tags=collection.tags,
+                forbidden=collection.forbidden,
+            )
+            for collection_id, collection in self.collections.items()
+            if collection.dataset_id == dataset_id
+            and (
+                not normalized_search
+                or normalized_search in collection.name.casefold()
+                or any(normalized_search in tag.casefold() for tag in collection.tags)
+            )
+        ]
+        return CollectionPage(tuple(matches[offset : offset + page_size]), len(matches))
 
     async def list_collection_data(
         self, collection_id: str, page_size: int = 30
@@ -141,6 +178,11 @@ class FakeFastGPT(FastGPTPort):
             content=content,
             config=dict(config),
             chunks=[chunk],
+            tags=(
+                tuple(tag for tag in config.get("tags", []) if isinstance(tag, str))
+                if self.supports_tags
+                else ()
+            ),
         )
         return CollectionRef(collection_id, inserted_count=1)
 

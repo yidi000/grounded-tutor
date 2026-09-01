@@ -405,7 +405,9 @@ Expected: FAIL because `SourceService` does not exist.
 
 - [ ] **Step 3: Implement the ingestion transaction**
 
-For each Workspace, use an `asyncio.Lock` from `WorkspaceLockRegistry`. While holding it: create a local Source in `INDEXING`; call the appropriate FastGPT create method; immediately call `set_collection_forbidden(collection_id, True)`; persist the Collection ID; fetch up to 30 processed items; transition to `REVIEW`; then release the lock. On any error after Collection creation, attempt to keep it forbidden, set the Source to `FAILED`, store only a safe error message, and preserve the retryable ingestion configuration.
+For each Workspace, use an `asyncio.Lock` from `WorkspaceLockRegistry`. While holding it: create a local Source in `INDEXING`; derive a stable opaque remote marker from its UUID; place the marker in both Collection tags and a remote-only name; call the appropriate FastGPT create method; immediately call `set_collection_forbidden(collection_id, True)`; use bounded `collection/listV2` pagination to confirm the exact marked Collection is forbidden; persist the Collection ID; fetch up to 30 processed items; transition to `REVIEW`; then release the lock. On any uncertain create result or later error, reconcile exact marker matches within that Workspace Dataset, attempt to forbid every match, set the Source to `FAILED`, store only a safe error message, and preserve the retryable ingestion configuration.
+
+This P0 lock is process-local, so the supported development run mode is one Uvicorn worker. If remote list/update remain unavailable, reconciliation cannot prove that the remote Collection is physically disabled; local state still fails closed as `FAILED`. Task 8 must filter retrievals against local `READY` Collection IDs before any chunk reaches generation. Persistent upload idempotency and distributed locking remain pre-public follow-ups.
 
 Expose:
 

@@ -62,11 +62,20 @@ def test_text_source_enters_review_and_returns_actual_processed_preview(
         "authority": "actual",
         "source_id": body["source"]["id"],
         "source_name": "Week 1",
-        "items": [{"position": 1, "q": "Mean is an average.", "a": ""}],
+        "items": [
+            {
+                "position": 1,
+                "q": "Mean is an average.",
+                "a": "",
+                "q_truncated": False,
+                "a_truncated": False,
+            }
+        ],
         "limit": 30,
     }
     assert "collection" not in response.text.lower()
     assert seeded_workspace.dataset_id not in response.text
+    assert "gt-src-" not in response.text
     with api_session_factory() as session:
         stored = session.scalar(select(Source))
     assert stored is not None
@@ -270,6 +279,38 @@ def test_external_failure_returns_safe_error_and_lists_failed_source(
     assert listed.json()[0]["error_message"] == "Source ingestion failed."
 
 
+def test_uncertain_create_reconciliation_marker_never_leaks_to_browser(
+    client: TestClient,
+    seeded_workspace: Workspace,
+    fake_fastgpt: FakeFastGPT,
+) -> None:
+    _register_dataset(fake_fastgpt, seeded_workspace)
+    original_create = fake_fastgpt.create_text_collection
+
+    async def commit_then_timeout(dataset_id, name, text, config):
+        await original_create(dataset_id, name, text, config)
+        raise ExternalServiceError(
+            service="fastgpt",
+            category="timeout",
+            safe_message="FastGPT request failed.",
+        )
+
+    fake_fastgpt.create_text_collection = commit_then_timeout
+    response = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/sources/text",
+        json={"source_name": "Local notes", "text": "Mean.", "settings": {}},
+    )
+    listed = client.get(f"/api/workspaces/{seeded_workspace.id}/sources")
+
+    assert response.status_code == 502
+    assert listed.status_code == 200
+    assert listed.json()[0]["name"] == "Local notes"
+    assert listed.json()[0]["status"] == "failed"
+    assert "gt-src-" not in response.text
+    assert "gt-src-" not in listed.text
+    assert next(iter(fake_fastgpt.collections.values())).name.startswith("gt-src-")
+
+
 @pytest.mark.parametrize("operation", ["set_collection_forbidden", "list_collection_data"])
 def test_post_creation_external_failures_are_safe_and_persist_failed_collection(
     client: TestClient,
@@ -378,6 +419,34 @@ def test_processed_preview_is_bounded_to_30_and_omits_external_chunk_ids(
     assert response.json()["limit"] == 30
     assert len(response.json()["items"]) == 30
     assert "external-private" not in response.text
+
+
+def test_processed_preview_sanitizes_controls_and_caps_public_fields(
+    client: TestClient,
+    seeded_workspace: Workspace,
+    fake_fastgpt: FakeFastGPT,
+) -> None:
+    _register_dataset(fake_fastgpt, seeded_workspace)
+    source_id = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/sources/text",
+        json={"source_name": "notes", "text": "Mean.", "settings": {}},
+    ).json()["source"]["id"]
+    fake_fastgpt.collections["collection-1"].chunks = [
+        ProcessedChunk("external-1", "Q" * 4_001 + "\x00private", "A\x00B")
+    ]
+
+    response = client.get(
+        f"/api/workspaces/{seeded_workspace.id}/sources/{source_id}/processed-preview"
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["q"] == "Q" * 4_000
+    assert item["a"] == "AB"
+    assert item["q_truncated"] is True
+    assert item["a_truncated"] is False
+    assert "private" not in response.text
+    assert "\\u0000" not in response.text
 
 
 def test_failed_source_without_collection_has_stable_unavailable_preview(
