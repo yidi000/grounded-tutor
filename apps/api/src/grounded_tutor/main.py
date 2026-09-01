@@ -1,12 +1,15 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from grounded_tutor.adapters.fakes import FakeFastGPT
 from grounded_tutor.adapters.fastgpt import FastGPTClient, FastGPTPort
 from grounded_tutor.config import get_settings
 from grounded_tutor.db import engine, ensure_database_is_current
+from grounded_tutor.routers.previews import router as previews_router
 from grounded_tutor.routers.workspaces import router as workspaces_router
 
 
@@ -32,6 +35,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Grounded Tutor API", version="0.1.0", lifespan=lifespan)
 app.include_router(workspaces_router)
+app.include_router(previews_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(
+    request: Request, error: RequestValidationError
+) -> JSONResponse:
+    del request, error
+    return JSONResponse(
+        status_code=422,
+        content={"detail": {"code": "validation_error"}},
+    )
 
 
 @app.get("/api/health")

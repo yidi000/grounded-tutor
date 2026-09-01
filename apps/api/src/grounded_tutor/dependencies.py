@@ -6,8 +6,10 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from grounded_tutor.adapters.fastgpt import FastGPTPort
+from grounded_tutor.config import Settings, get_settings
 from grounded_tutor.db import get_session
 from grounded_tutor.repositories.workspaces import WorkspaceRepository
+from grounded_tutor.services.previews import PreviewService
 from grounded_tutor.services.workspaces import WorkspaceService
 
 
@@ -20,3 +22,12 @@ def get_workspace_service(
     fastgpt: Annotated[FastGPTPort, Depends(get_fastgpt)],
 ) -> WorkspaceService:
     return WorkspaceService(WorkspaceRepository(session), fastgpt)
+
+
+def get_preview_service(
+    session: Annotated[Session, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> PreviewService:
+    return PreviewService(
+        WorkspaceRepository(session), max_upload_bytes=settings.max_upload_bytes
+    )
