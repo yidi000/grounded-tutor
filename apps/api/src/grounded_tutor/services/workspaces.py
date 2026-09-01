@@ -43,8 +43,9 @@ class WorkspaceService:
 
         try:
             return self._repository.create(title=title, dataset_id=dataset.dataset_id)
-        except WorkspacePersistenceError:
-            await self._compensate_dataset_creation(dataset.dataset_id)
+        except WorkspacePersistenceError as error:
+            if not error.committed:
+                await self._compensate_dataset_creation(dataset.dataset_id)
             raise
 
     async def _compensate_dataset_creation(self, dataset_id: str) -> None:

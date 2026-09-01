@@ -40,7 +40,10 @@ async def create_workspace(
 def list_workspaces(
     service: Annotated[WorkspaceService, Depends(get_workspace_service)]
 ) -> list[WorkspaceResponse]:
-    return [_response(workspace) for workspace in service.list()]
+    try:
+        return [_response(workspace) for workspace in service.list()]
+    except WorkspacePersistenceError:
+        _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceResponse)
@@ -70,6 +73,8 @@ def _read_workspace(workspace_id: UUID, service: WorkspaceService) -> WorkspaceR
         return _response(service.get(workspace_id))
     except WorkspaceNotFoundError:
         _api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
+    except WorkspacePersistenceError:
+        _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
 def _parse_workspace_id(workspace_id: str) -> UUID:

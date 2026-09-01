@@ -1,18 +1,23 @@
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
-from sqlalchemy import event
+from sqlalchemy import event, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
 import grounded_tutor.main as main_module
 from grounded_tutor.adapters.fakes import FakeFastGPT
 from grounded_tutor.adapters.fastgpt import ExternalServiceError, FastGPTClient
 from grounded_tutor.config import Settings
+from grounded_tutor.db import get_session
 from grounded_tutor.dependencies import get_fastgpt
 from grounded_tutor.domain.models import Source, SourceStatus, SourceType, Workspace
 from grounded_tutor.repositories.workspaces import WorkspacePersistenceError, WorkspaceRepository
+from grounded_tutor.services.workspaces import WorkspaceService
 
 
 def test_create_workspace_creates_fastgpt_dataset(client: TestClient, fake_fastgpt: FakeFastGPT) -> None:
@@ -236,6 +241,143 @@ def test_live_fastgpt_is_shared_for_lifespan_and_closed_without_network(
         assert not fastgpt.is_closed
 
     assert fastgpt.is_closed
+
+
+@pytest.mark.asyncio
+async def test_add_failure_rolls_back_and_compensates_exact_dataset(api_engine) -> None:
+    class AddFailingSession(Session):
+        def add(self, instance, _warn: bool = True) -> None:
+            raise SQLAlchemyError("database connection detail")
+
+    fake_fastgpt = FakeFastGPT()
+    session = AddFailingSession(bind=api_engine, expire_on_commit=False)
+    service = WorkspaceService(WorkspaceRepository(session), fake_fastgpt)
+    try:
+        with pytest.raises(WorkspacePersistenceError) as caught:
+            await service.create(
+                title="Statistics", vector_model=None, agent_model=None, vlm_model=None
+            )
+    finally:
+        session.close()
+
+    assert caught.value.committed is False
+    assert fake_fastgpt.delete_dataset_calls == ["dataset-1"]
+    assert _workspace_count(api_engine) == 0
+
+
+@pytest.mark.asyncio
+async def test_flush_failure_rolls_back_and_compensates_exact_dataset(api_engine) -> None:
+    class FlushFailingSession(Session):
+        def flush(self, objects=None) -> None:
+            super().flush(objects)
+            raise SQLAlchemyError("flush failed")
+
+    session = FlushFailingSession(bind=api_engine, expire_on_commit=False)
+    fake_fastgpt = FakeFastGPT()
+    service = WorkspaceService(WorkspaceRepository(session), fake_fastgpt)
+    try:
+        with pytest.raises(WorkspacePersistenceError) as caught:
+            await service.create(
+                title="Statistics", vector_model=None, agent_model=None, vlm_model=None
+            )
+    finally:
+        session.close()
+
+    assert caught.value.committed is False
+    assert fake_fastgpt.delete_dataset_calls == ["dataset-1"]
+    assert _workspace_count(api_engine) == 0
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_rolls_back_and_compensates_exact_dataset(api_engine) -> None:
+    class CommitFailingSession(Session):
+        def commit(self) -> None:
+            raise SQLAlchemyError("commit failed")
+
+    session = CommitFailingSession(bind=api_engine, expire_on_commit=False)
+    fake_fastgpt = FakeFastGPT()
+    service = WorkspaceService(WorkspaceRepository(session), fake_fastgpt)
+    try:
+        with pytest.raises(WorkspacePersistenceError) as caught:
+            await service.create(
+                title="Statistics", vector_model=None, agent_model=None, vlm_model=None
+            )
+    finally:
+        session.close()
+
+    assert caught.value.committed is False
+    assert fake_fastgpt.delete_dataset_calls == ["dataset-1"]
+    assert _workspace_count(api_engine) == 0
+
+
+@pytest.mark.asyncio
+async def test_post_commit_refresh_failure_does_not_compensate_committed_workspace(api_engine) -> None:
+    class PostCommitRefreshFailingSession(Session):
+        def refresh(self, instance, attribute_names=None, with_for_update=None) -> None:
+            raise SQLAlchemyError("post-commit read failed")
+
+    fake_fastgpt = FakeFastGPT()
+    session = PostCommitRefreshFailingSession(bind=api_engine, expire_on_commit=False)
+    service = WorkspaceService(WorkspaceRepository(session), fake_fastgpt)
+    try:
+        workspace = await service.create(
+            title="Statistics", vector_model=None, agent_model=None, vlm_model=None
+        )
+    finally:
+        session.close()
+
+    assert workspace.title == "Statistics"
+    assert fake_fastgpt.delete_dataset_calls == []
+    with Session(api_engine) as check_session:
+        persisted = check_session.scalar(select(Workspace).where(Workspace.id == workspace.id))
+    assert persisted is not None
+    assert persisted.dataset_id == "dataset-1"
+
+
+def test_add_failure_with_compensation_failure_returns_safe_api_error(api_engine) -> None:
+    class AddFailingSession(Session):
+        def add(self, instance, _warn: bool = True) -> None:
+            raise SQLAlchemyError("database connection detail")
+
+    fake_fastgpt = FakeFastGPT()
+    fake_fastgpt.delete_dataset = AsyncMock(side_effect=RuntimeError("dataset-1 secret"))
+
+    with _client_with_session(api_engine, fake_fastgpt, AddFailingSession) as client:
+        response = client.post("/api/workspaces", json={"title": "Statistics"})
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": {"code": "persistence_error"}}
+    fake_fastgpt.delete_dataset.assert_awaited_once_with("dataset-1")
+    assert "dataset-1" not in response.text
+    assert "secret" not in response.text
+    assert _workspace_count(api_engine) == 0
+
+
+@contextmanager
+def _client_with_session(
+    api_engine, fastgpt: FakeFastGPT, session_class: type[Session]
+) -> Generator[TestClient, None, None]:
+    session_factory = sessionmaker(bind=api_engine, class_=session_class, expire_on_commit=False)
+
+    def get_test_session() -> Generator[Session, None, None]:
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    main_module.app.dependency_overrides[get_session] = get_test_session
+    main_module.app.dependency_overrides[get_fastgpt] = lambda: fastgpt
+    try:
+        with TestClient(main_module.app) as client:
+            yield client
+    finally:
+        main_module.app.dependency_overrides.clear()
+
+
+def _workspace_count(api_engine) -> int:
+    with Session(api_engine) as session:
+        return len(session.scalars(select(Workspace)).all())
 
 
 def _contains_private_key(value: object) -> bool:
