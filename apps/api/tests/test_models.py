@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import Mock
@@ -13,13 +16,15 @@ from sqlalchemy.orm import Session
 import grounded_tutor.db as db_module
 import grounded_tutor.main as main_module
 from alembic import command
-from grounded_tutor.config import Settings, get_settings
-from grounded_tutor.db import (
+from grounded_tutor.alembic_config import (
     ALEMBIC_DATABASE_URL_ATTRIBUTE,
-    create_database_engine,
-    ensure_database_is_current,
     get_alembic_config,
     resolve_alembic_database_url,
+)
+from grounded_tutor.config import API_ROOT, Settings, get_settings
+from grounded_tutor.db import (
+    create_database_engine,
+    ensure_database_is_current,
 )
 from grounded_tutor.domain.models import (
     Base,
@@ -122,6 +127,30 @@ def test_alembic_config_escapes_percent_encoded_database_url() -> None:
 
     assert config.attributes[ALEMBIC_DATABASE_URL_ATTRIBUTE] == database_url
     assert config.get_main_option("sqlalchemy.url") == database_url
+
+
+def test_alembic_offline_postgresql_sql_does_not_require_a_postgresql_driver() -> None:
+    database_url = "postgresql+psycopg://user:p%40ss@example.test/grounded_tutor"
+    command_source = (
+        "from alembic import command\n"
+        "from grounded_tutor.config import Settings\n"
+        "from grounded_tutor.alembic_config import get_alembic_config\n"
+        f"settings = Settings(database_url={database_url!r})\n"
+        "command.upgrade(get_alembic_config(settings), 'head', sql=True)\n"
+    )
+    environment = {**os.environ, "DATABASE_URL": database_url, "PYTHONPATH": str(API_ROOT / "src")}
+
+    result = subprocess.run(
+        [sys.executable, "-c", command_source],
+        cwd=API_ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "CREATE TABLE workspaces" in result.stdout
 
 
 def test_settings_cache_does_not_retain_temporary_database_url(
