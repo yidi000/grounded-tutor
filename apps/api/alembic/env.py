@@ -10,11 +10,11 @@ from alembic import context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from grounded_tutor.config import get_settings
+from grounded_tutor.db import configure_alembic_database_url, resolve_alembic_database_url
 from grounded_tutor.domain.models import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+configure_alembic_database_url(config, resolve_alembic_database_url(config))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
