@@ -287,8 +287,189 @@ async def test_fastgpt_network_errors_are_redacted(error: httpx.RequestError) ->
     await injected.aclose()
 
 
+@pytest.mark.asyncio
+async def test_network_error_does_not_retain_api_key_or_uploaded_content() -> None:
+    api_key = "API-KEY-MARKER"
+    upload = b"UPLOADED-CONTENT-MARKER"
+
+    def fail_with_request(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("NETWORK-ERROR-MARKER", request=request)
+
+    injected = httpx.AsyncClient(transport=httpx.MockTransport(fail_with_request))
+    client = FastGPTClient("https://fastgpt.test", api_key, client=injected)
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.create_file_collection("dataset-1", "private.pdf", upload, {})
+
+    assert caught.value.service == "fastgpt"
+    assert caught.value.category == "network"
+    _assert_exception_surface_redacted(
+        caught.value,
+        api_key,
+        "Bearer",
+        upload.decode(),
+        "NETWORK-ERROR-MARKER",
+    )
+    await injected.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_invalid_json_error_does_not_retain_sensitive_response_or_json_request() -> None:
+    api_key = "API-KEY-MARKER"
+    request_content = "JSON-REQUEST-CONTENT-MARKER"
+    response_header = "RESPONSE-HEADER-MARKER"
+    response_body = "INVALID-RESPONSE-BODY-MARKER"
+    respx.post("https://fastgpt.test/api/core/dataset/collection/create/text").mock(
+        return_value=httpx.Response(
+            200,
+            headers={"X-Private": response_header},
+            content=response_body.encode(),
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", api_key)
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.create_text_collection("dataset-1", "private", request_content, {})
+
+    assert caught.value.category == "invalid_json"
+    _assert_exception_surface_redacted(
+        caught.value,
+        api_key,
+        "Bearer",
+        request_content,
+        response_header,
+        response_body,
+    )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    "status, data, category",
+    [
+        (503, {"code": 200, "data": {}}, "http_status"),
+        (200, {"code": 200, "data": {}}, "malformed_response"),
+    ],
+)
+async def test_response_errors_do_not_expose_sensitive_response_state(
+    status: int, data: dict[str, object], category: str
+) -> None:
+    api_key = "API-KEY-MARKER"
+    request_content = "JSON-REQUEST-CONTENT-MARKER"
+    response_header = "RESPONSE-HEADER-MARKER"
+    response_body = "RESPONSE-BODY-MARKER"
+    respx.post("https://fastgpt.test/api/core/dataset/create").mock(
+        return_value=httpx.Response(
+            status,
+            headers={"X-Private": response_header},
+            content=json.dumps(data).replace("{}", f'{{"private":"{response_body}"}}').encode(),
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", api_key)
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.create_dataset(request_content)
+
+    assert caught.value.category == category
+    _assert_exception_surface_redacted(
+        caught.value,
+        api_key,
+        "Bearer",
+        request_content,
+        response_header,
+        response_body,
+    )
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize("kind", ["file", "text"])
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"collectionId": "collection-1"},
+        {"collectionId": "collection-1", "insertLen": "1"},
+        {"collectionId": "collection-1", "insertLen": -1},
+        {"collectionId": "collection-1", "insertedCount": True},
+    ],
+)
+async def test_collection_result_requires_non_negative_integer_insert_count(
+    kind: str, data: dict[str, object]
+) -> None:
+    endpoint = (
+        "/api/core/dataset/collection/create/localFile"
+        if kind == "file"
+        else "/api/core/dataset/collection/create/text"
+    )
+    respx.post(f"https://fastgpt.test{endpoint}").mock(
+        return_value=httpx.Response(200, json={"code": 200, "data": data})
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ExternalServiceError) as caught:
+        if kind == "file":
+            await client.create_file_collection("dataset-1", "notes.pdf", b"content", {})
+        else:
+            await client.create_text_collection("dataset-1", "notes", "content", {})
+
+    assert caught.value.category == "malformed_response"
+    assert caught.value.service == "fastgpt"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_collection_result_accepts_inserted_count_alias() -> None:
+    respx.post("https://fastgpt.test/api/core/dataset/collection/create/text").mock(
+        return_value=httpx.Response(
+            200, json={"code": 200, "data": {"collectionId": "collection-1", "insertedCount": 3}}
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    collection = await client.create_text_collection("dataset-1", "notes", "content", {})
+
+    assert collection.inserted_count == 3
+    await client.aclose()
+
+
 def _request_json(request: httpx.Request) -> object:
     return json.loads(request.content)
+
+
+def _assert_exception_surface_redacted(error: BaseException, *markers: str) -> None:
+    surface = _exception_surface(error)
+    for marker in markers:
+        assert marker not in surface
+
+
+def _exception_surface(value: object, seen: set[int] | None = None) -> str:
+    seen = seen or set()
+    if id(value) in seen:
+        return ""
+    seen.add(id(value))
+    if isinstance(value, (str, bytes, bytearray, int, float, bool, type(None))):
+        return repr(value)
+    parts = [repr(value), str(value)]
+    if isinstance(value, BaseException):
+        parts.extend(
+            [
+                _exception_surface(value.args, seen),
+                _exception_surface(value.__cause__, seen),
+                _exception_surface(value.__context__, seen),
+            ]
+        )
+    if isinstance(value, dict):
+        for key, item in value.items():
+            parts.extend([_exception_surface(key, seen), _exception_surface(item, seen)])
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        parts.extend(_exception_surface(item, seen) for item in value)
+    else:
+        parts.extend(_exception_surface(item, seen) for item in vars(value).values())
+    return " ".join(parts)
 
 
 @pytest.mark.asyncio

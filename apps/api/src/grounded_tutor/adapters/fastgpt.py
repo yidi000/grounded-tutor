@@ -82,8 +82,9 @@ class FastGPTPort(Protocol):
 class ExternalServiceError(RuntimeError):
     """A deliberately redacted error at an outbound service boundary."""
 
-    def __init__(self, *, service: str, safe_message: str) -> None:
+    def __init__(self, *, service: str, category: str, safe_message: str) -> None:
         self.service = service
+        self.category = category
         self.safe_message = safe_message
         super().__init__(f"{service}: {safe_message}")
 
@@ -219,6 +220,7 @@ class FastGPTClient:
         ]
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        failure_category: str | None = None
         try:
             response = await self._client.request(
                 method,
@@ -226,28 +228,25 @@ class FastGPTClient:
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 **kwargs,
             )
-        except (httpx.TimeoutException, httpx.RequestError) as exc:
-            raise ExternalServiceError(
-                service="fastgpt", safe_message="FastGPT request failed."
-            ) from exc
+        except httpx.TimeoutException:
+            failure_category = "timeout"
+        except httpx.RequestError:
+            failure_category = "network"
+        if failure_category is not None:
+            raise _failure(failure_category, "FastGPT request failed.")
         if not response.is_success:
-            raise ExternalServiceError(
-                service="fastgpt", safe_message="FastGPT returned an unsuccessful HTTP status."
-            )
+            raise _failure("http_status", "FastGPT returned an unsuccessful HTTP status.")
+        invalid_json = False
         try:
             payload = response.json()
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ExternalServiceError(
-                service="fastgpt", safe_message="FastGPT returned invalid JSON."
-            ) from exc
+        except (ValueError, UnicodeDecodeError):
+            invalid_json = True
+        if invalid_json:
+            raise _failure("invalid_json", "FastGPT returned invalid JSON.")
         if not isinstance(payload, dict):
-            raise ExternalServiceError(
-                service="fastgpt", safe_message="FastGPT returned a malformed response."
-            )
+            raise _failure("malformed_response", "FastGPT returned a malformed response.")
         if payload.get("code") != 200:
-            raise ExternalServiceError(
-                service="fastgpt", safe_message="FastGPT reported an unsuccessful result."
-            )
+            raise _failure("service_rejected", "FastGPT reported an unsuccessful result.")
         return payload.get("data")
 
 
@@ -259,8 +258,12 @@ def _protected_config(config: Mapping[str, Any], **required_fields: Any) -> dict
 
 def _collection_ref(data: Any) -> CollectionRef:
     data_object = _object(data)
-    inserted_count = data_object.get("insertLen", data_object.get("insertedCount", 0))
-    if isinstance(inserted_count, bool) or not isinstance(inserted_count, int):
+    inserted_count = data_object.get("insertLen", data_object.get("insertedCount"))
+    if (
+        isinstance(inserted_count, bool)
+        or not isinstance(inserted_count, int)
+        or inserted_count < 0
+    ):
         _malformed()
     return CollectionRef(
         collection_id=_required_string(data_object, "collectionId", "id", "_id"),
@@ -296,4 +299,8 @@ def _required_number(data: dict[str, Any], key: str) -> float:
 
 
 def _malformed() -> None:
-    raise ExternalServiceError(service="fastgpt", safe_message="FastGPT returned a malformed response.")
+    raise _failure("malformed_response", "FastGPT returned a malformed response.")
+
+
+def _failure(category: str, safe_message: str) -> ExternalServiceError:
+    return ExternalServiceError(service="fastgpt", category=category, safe_message=safe_message)
