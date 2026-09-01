@@ -65,7 +65,7 @@ class PreviewRequestBodyLimitMiddleware:
                 message = messages[next_message]
                 next_message += 1
                 return message
-            return {"type": "http.disconnect"}
+            return await receive()
 
         await self._app(scope, replay_receive, send)
 

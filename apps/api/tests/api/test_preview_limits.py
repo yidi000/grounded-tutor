@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -11,6 +12,7 @@ from grounded_tutor.domain.models import Workspace
 from grounded_tutor.middleware import (
     MAX_PREVIEW_REQUEST_MESSAGES,
     PREVIEW_REQUEST_OVERHEAD_BYTES,
+    PreviewRequestBodyLimitMiddleware,
 )
 
 
@@ -157,6 +159,50 @@ async def test_fragmented_stream_is_bounded_by_message_count(
     assert receive_calls == MAX_PREVIEW_REQUEST_MESSAGES + 1
 
 
+@pytest.mark.asyncio
+async def test_replay_delegates_to_real_disconnect_after_buffered_body() -> None:
+    observed: list[dict[str, object]] = []
+
+    async def downstream(scope, receive, send) -> None:
+        del scope, send
+        observed.append(await receive())
+        observed.append(await receive())
+
+    events = [
+        {"type": "http.request", "body": b"{}", "more_body": False},
+        {"type": "http.disconnect", "reason": "real-client-disconnect"},
+    ]
+
+    async def receive() -> dict[str, object]:
+        return events.pop(0)
+
+    async def send(message: dict[str, object]) -> None:
+        del message
+
+    middleware = PreviewRequestBodyLimitMiddleware(
+        downstream,
+        settings_provider=lambda: Settings(max_preview_text_bytes=100),
+    )
+    await asyncio.wait_for(
+        middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/api/workspaces/id/source-previews/text",
+                "headers": [],
+            },
+            receive,
+            send,
+        ),
+        timeout=1,
+    )
+
+    assert observed == [
+        {"type": "http.request", "body": b"{}", "more_body": False},
+        {"type": "http.disconnect", "reason": "real-client-disconnect"},
+    ]
+
+
 def test_text_service_limit_returns_stable_413(
     client: TestClient,
     seeded_workspace: Workspace,
@@ -186,3 +232,17 @@ def test_preview_error_responses_match_runtime_schema_in_openapi(
             assert responses[status_code]["content"]["application/json"]["schema"] == {
                 "$ref": "#/components/schemas/ApiErrorResponse"
             }
+
+
+def test_workspace_validation_errors_share_the_runtime_error_schema(
+    client: TestClient,
+) -> None:
+    openapi = client.get("/openapi.json").json()
+    for method, path in [
+        ("post", "/api/workspaces"),
+        ("patch", "/api/workspaces/{workspace_id}"),
+    ]:
+        schema = openapi["paths"][path][method]["responses"]["422"]["content"][
+            "application/json"
+        ]["schema"]
+        assert schema == {"$ref": "#/components/schemas/ApiErrorResponse"}

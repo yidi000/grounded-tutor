@@ -6,7 +6,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from grounded_tutor.dependencies import get_workspace_service
-from grounded_tutor.domain.schemas import WorkspaceCreate, WorkspaceResponse, WorkspaceUpdate
+from grounded_tutor.domain.schemas import (
+    ApiErrorResponse,
+    WorkspaceCreate,
+    WorkspaceResponse,
+    WorkspaceUpdate,
+)
 from grounded_tutor.repositories.workspaces import WorkspacePersistenceError, WorkspaceSummary
 from grounded_tutor.services.workspaces import (
     ExternalWorkspaceServiceError,
@@ -16,8 +21,30 @@ from grounded_tutor.services.workspaces import (
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
+VALIDATION_ERROR_RESPONSE = {
+    422: {"model": ApiErrorResponse, "description": "Workspace input is invalid."}
+}
+CREATE_ERROR_RESPONSES = {
+    **VALIDATION_ERROR_RESPONSE,
+    500: {"model": ApiErrorResponse, "description": "Local persistence failed."},
+    502: {"model": ApiErrorResponse, "description": "External service failed."},
+}
+LIST_ERROR_RESPONSES = {
+    500: {"model": ApiErrorResponse, "description": "Local persistence failed."}
+}
+DETAIL_ERROR_RESPONSES = {
+    404: {"model": ApiErrorResponse, "description": "Workspace not found."},
+    500: {"model": ApiErrorResponse, "description": "Local persistence failed."},
+}
+UPDATE_ERROR_RESPONSES = {**DETAIL_ERROR_RESPONSES, **VALIDATION_ERROR_RESPONSE}
 
-@router.post("", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "",
+    response_model=WorkspaceResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=CREATE_ERROR_RESPONSES,
+)
 async def create_workspace(
     payload: WorkspaceCreate,
     service: Annotated[WorkspaceService, Depends(get_workspace_service)],
@@ -36,7 +63,7 @@ async def create_workspace(
     return _response(workspace)
 
 
-@router.get("", response_model=list[WorkspaceResponse])
+@router.get("", response_model=list[WorkspaceResponse], responses=LIST_ERROR_RESPONSES)
 def list_workspaces(
     service: Annotated[WorkspaceService, Depends(get_workspace_service)]
 ) -> list[WorkspaceResponse]:
@@ -46,7 +73,11 @@ def list_workspaces(
         _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
-@router.get("/{workspace_id}", response_model=WorkspaceResponse)
+@router.get(
+    "/{workspace_id}",
+    response_model=WorkspaceResponse,
+    responses=DETAIL_ERROR_RESPONSES,
+)
 def get_workspace(
     workspace_id: str,
     service: Annotated[WorkspaceService, Depends(get_workspace_service)],
@@ -54,7 +85,11 @@ def get_workspace(
     return _read_workspace(_parse_workspace_id(workspace_id), service)
 
 
-@router.patch("/{workspace_id}", response_model=WorkspaceResponse)
+@router.patch(
+    "/{workspace_id}",
+    response_model=WorkspaceResponse,
+    responses=UPDATE_ERROR_RESPONSES,
+)
 def rename_workspace(
     workspace_id: str,
     payload: WorkspaceUpdate,

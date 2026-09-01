@@ -1,3 +1,6 @@
+import gc
+import struct
+import tracemalloc
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -167,24 +170,91 @@ def test_small_highly_compressed_docx_is_rejected_before_python_docx_expands_it(
     assert caught.value.code == "unsafe_archive"
 
 
-def test_docx_with_excessive_archive_members_is_rejected() -> None:
+def test_docx_with_excessive_archive_members_is_rejected_before_zipfile_allocates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     document = Document()
     document.add_paragraph("Mean is an average.")
     output = BytesIO()
     document.save(output)
     with ZipFile(output, "a", compression=ZIP_DEFLATED) as archive:
-        for index in range(1001):
+        for index in range(50_000):
             archive.writestr(f"customXml/extra-{index}.xml", "x")
+    content = output.getvalue()
+    del output
+    gc.collect()
+    monkeypatch.setattr(
+        previews_module,
+        "ZipFile",
+        lambda stream: (_ for _ in ()).throw(
+            AssertionError("ZipFile must not inspect an excessive central directory")
+        ),
+    )
 
-    with pytest.raises(PreviewError) as caught:
-        preview_file(
-            "many-members.docx",
-            output.getvalue(),
-            ChunkSettings(),
-            max_upload_bytes=20_000_000,
-        )
+    tracemalloc.start()
+    try:
+        with pytest.raises(PreviewError) as caught:
+            preview_file(
+                "many-members.docx",
+                content,
+                ChunkSettings(),
+                max_upload_bytes=20_000_000,
+            )
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
 
     assert caught.value.code == "unsafe_archive"
+    assert peak_bytes < 2_000_000
+
+
+def test_docx_rejects_multidisk_eocd_before_zipfile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = bytearray(_small_docx())
+    eocd = content.rfind(b"PK\x05\x06")
+    struct.pack_into("<H", content, eocd + 4, 1)
+    _rejects_before_zipfile(bytes(content), monkeypatch)
+
+
+def test_docx_rejects_forged_central_directory_bounds_before_zipfile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = bytearray(_small_docx())
+    eocd = content.rfind(b"PK\x05\x06")
+    struct.pack_into("<I", content, eocd + 16, len(content) + 100)
+    _rejects_before_zipfile(bytes(content), monkeypatch)
+
+
+def test_docx_rejects_zip64_markers_before_zipfile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = bytearray(_small_docx())
+    eocd = content.rfind(b"PK\x05\x06")
+    struct.pack_into("<H", content, eocd + 10, 0xFFFF)
+    _rejects_before_zipfile(bytes(content), monkeypatch)
+
+
+def test_docx_rejects_trailing_junk_with_fake_eocd_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = _small_docx() + b"trailing-PK\x05\x06-junk"
+    _rejects_before_zipfile(content, monkeypatch)
+
+
+def test_docx_accepts_eocd_signature_inside_a_valid_zip_comment() -> None:
+    output = BytesIO(_small_docx())
+    with ZipFile(output, "a") as archive:
+        archive.comment = b"comment contains PK\x05\x06 but is not an EOCD record"
+
+    preview = preview_file(
+        "commented.docx",
+        output.getvalue(),
+        ChunkSettings(),
+        max_upload_bytes=20_000_000,
+    )
+
+    assert preview.items[0].text == "Mean is an average."
 
 
 def test_docx_extracted_node_budget_is_deterministic() -> None:
@@ -283,3 +353,31 @@ def test_pdf_extracted_text_uses_the_shared_character_budget(
         )
 
     assert caught.value.code == "source_too_large"
+
+
+def _small_docx() -> bytes:
+    document = Document()
+    document.add_paragraph("Mean is an average.")
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _rejects_before_zipfile(content: bytes, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        previews_module,
+        "ZipFile",
+        lambda stream: (_ for _ in ()).throw(
+            AssertionError("raw ZIP preflight must reject before ZipFile")
+        ),
+    )
+
+    with pytest.raises(PreviewError) as caught:
+        preview_file(
+            "unsafe.docx",
+            content,
+            ChunkSettings(),
+            max_upload_bytes=20_000_000,
+        )
+
+    assert caught.value.code == "unsafe_archive"

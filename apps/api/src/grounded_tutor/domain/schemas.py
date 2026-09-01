@@ -9,6 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from grounded_tutor.domain.models import SourceStatus, SourceType
 
 
+class ApiErrorDetail(BaseModel):
+    code: str
+
+
+class ApiErrorResponse(BaseModel):
+    detail: ApiErrorDetail
+
+
 class WorkspaceCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     vector_model: str | None = None

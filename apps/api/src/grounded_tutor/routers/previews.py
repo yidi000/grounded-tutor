@@ -9,12 +9,12 @@ from pydantic import ValidationError
 
 from grounded_tutor.dependencies import get_preview_service
 from grounded_tutor.domain.ingestion import (
-    ApiErrorResponse,
     ChunkSettings,
     PreviewResponse,
     TextPreviewRequest,
     validate_public_chunk_settings,
 )
+from grounded_tutor.domain.schemas import ApiErrorResponse
 from grounded_tutor.repositories.workspaces import WorkspacePersistenceError
 from grounded_tutor.services.previews import (
     PreviewError,

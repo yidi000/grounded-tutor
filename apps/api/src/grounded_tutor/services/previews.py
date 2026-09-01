@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+import struct
 from collections.abc import Iterator, Mapping
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -29,11 +30,24 @@ MAX_PREVIEW_EXCERPT_CHARS = 500
 # not claim to sandbox third-party parsers or provide a wall-clock timeout.
 DEFAULT_MAX_EXTRACTED_CHARACTERS = 40_000_000
 MAX_DOCX_ARCHIVE_MEMBERS = 1_000
+MAX_DOCX_CENTRAL_DIRECTORY_BYTES = 2_000_000
 MAX_DOCX_UNCOMPRESSED_BYTES = 80_000_000
 MAX_DOCX_COMPRESSION_RATIO = 100.0
 MAX_DOCX_BLOCKS = 10_000
 MAX_PDF_PAGES = 500
 SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".md", ".txt", ".html", ".csv"})
+
+ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
+ZIP64_EOCD_SIGNATURE = b"PK\x06\x06"
+ZIP64_LOCATOR_SIGNATURE = b"PK\x06\x07"
+ZIP_CENTRAL_DIRECTORY_SIGNATURE = b"PK\x01\x02"
+ZIP_LOCAL_FILE_SIGNATURE = b"PK\x03\x04"
+ZIP_EOCD_SIZE = 22
+ZIP_MAX_COMMENT_BYTES = 65_535
+ZIP_CENTRAL_DIRECTORY_HEADER_SIZE = 46
+ZIP64_EXTRA_FIELD_ID = 0x0001
+ZIP16_SENTINEL = 0xFFFF
+ZIP32_SENTINEL = 0xFFFFFFFF
 
 
 class PreviewError(RuntimeError):
@@ -237,8 +251,8 @@ def _extract_text(
                 extracted_rows.append(extracted)
         return "\n".join(extracted_rows)
     if suffix == ".docx":
-        _preflight_docx(content)
-        document = Document(BytesIO(content))
+        validated_content = _preflight_docx(content)
+        document = Document(BytesIO(validated_content))
         blocks: list[str] = []
         extracted_characters = 0
         work_units = 0
@@ -295,8 +309,9 @@ def _extract_text(
     return "\n\n".join(pages)
 
 
-def _preflight_docx(content: bytes) -> None:
-    with ZipFile(BytesIO(content)) as archive:
+def _preflight_docx(content: bytes) -> bytes:
+    validated_content = _raw_zip_preflight(content)
+    with ZipFile(BytesIO(validated_content)) as archive:
         members = archive.infolist()
     if len(members) > MAX_DOCX_ARCHIVE_MEMBERS:
         raise PreviewError("unsafe_archive")
@@ -317,6 +332,197 @@ def _preflight_docx(content: bytes) -> None:
         for member in members
     ):
         raise PreviewError("unsafe_archive")
+    return validated_content
+
+
+def _raw_zip_preflight(content: bytes) -> bytes:
+    """Validate bounded ZIP metadata before ZipFile can allocate ZipInfo objects."""
+
+    eocd = _find_valid_eocd(content)
+    (
+        eocd_offset,
+        entry_count,
+        central_directory_size,
+        central_directory_offset,
+        comment_length,
+    ) = eocd
+    if entry_count == 0 or entry_count > MAX_DOCX_ARCHIVE_MEMBERS:
+        raise PreviewError("unsafe_archive")
+    if central_directory_size > MAX_DOCX_CENTRAL_DIRECTORY_BYTES:
+        raise PreviewError("unsafe_archive")
+    central_directory_end = central_directory_offset + central_directory_size
+    if (
+        central_directory_offset > eocd_offset
+        or central_directory_end != eocd_offset
+    ):
+        raise PreviewError("unsafe_archive")
+
+    _validate_raw_central_directory(
+        content,
+        entry_count=entry_count,
+        start=central_directory_offset,
+        end=central_directory_end,
+    )
+    if comment_length == 0:
+        return content
+
+    # CPython's zipfile searches for the last EOCD signature, including inside
+    # the comment. Remove an already-validated comment before invoking it.
+    sanitized = bytearray(content[: eocd_offset + ZIP_EOCD_SIZE])
+    struct.pack_into("<H", sanitized, eocd_offset + 20, 0)
+    return bytes(sanitized)
+
+
+def _find_valid_eocd(content: bytes) -> tuple[int, int, int, int, int]:
+    search_start = max(0, len(content) - ZIP_EOCD_SIZE - ZIP_MAX_COMMENT_BYTES)
+    candidate = content.rfind(ZIP_EOCD_SIGNATURE, search_start)
+    if candidate < 0 and content.find(ZIP_EOCD_SIGNATURE) < 0:
+        raise PreviewError("unreadable_file")
+    while candidate >= search_start:
+        parsed = _parse_eocd_candidate(content, candidate)
+        if parsed is not None:
+            return parsed
+        candidate = content.rfind(ZIP_EOCD_SIGNATURE, search_start, candidate)
+    raise PreviewError("unsafe_archive")
+
+
+def _parse_eocd_candidate(
+    content: bytes, offset: int
+) -> tuple[int, int, int, int, int] | None:
+    if offset + ZIP_EOCD_SIZE > len(content):
+        return None
+    (
+        signature,
+        disk_number,
+        central_directory_disk,
+        entries_on_disk,
+        entry_count,
+        central_directory_size,
+        central_directory_offset,
+        comment_length,
+    ) = struct.unpack_from("<4s4H2IH", content, offset)
+    if signature != ZIP_EOCD_SIGNATURE:
+        return None
+    if offset + ZIP_EOCD_SIZE + comment_length != len(content):
+        return None
+    if (
+        disk_number != 0
+        or central_directory_disk != 0
+        or entries_on_disk != entry_count
+        or entry_count == ZIP16_SENTINEL
+        or central_directory_size == ZIP32_SENTINEL
+        or central_directory_offset == ZIP32_SENTINEL
+    ):
+        return None
+    if (
+        offset >= 20
+        and content[offset - 20 : offset - 16] == ZIP64_LOCATOR_SIGNATURE
+    ):
+        return None
+    if (
+        content.find(
+            ZIP64_EOCD_SIGNATURE,
+            max(0, central_directory_offset - 56),
+            offset,
+        )
+        >= 0
+    ):
+        return None
+    if central_directory_offset + central_directory_size != offset:
+        return None
+    return (
+        offset,
+        entry_count,
+        central_directory_size,
+        central_directory_offset,
+        comment_length,
+    )
+
+
+def _validate_raw_central_directory(
+    content: bytes,
+    *,
+    entry_count: int,
+    start: int,
+    end: int,
+) -> None:
+    position = start
+    parsed_entries = 0
+    total_compressed_bytes = 0
+    total_uncompressed_bytes = 0
+    while position < end:
+        if (
+            parsed_entries >= MAX_DOCX_ARCHIVE_MEMBERS
+            or position + ZIP_CENTRAL_DIRECTORY_HEADER_SIZE > end
+            or content[position : position + 4] != ZIP_CENTRAL_DIRECTORY_SIGNATURE
+        ):
+            raise PreviewError("unsafe_archive")
+        compressed_size, uncompressed_size = struct.unpack_from(
+            "<II", content, position + 20
+        )
+        filename_length, extra_length, member_comment_length = struct.unpack_from(
+            "<HHH", content, position + 28
+        )
+        member_disk = struct.unpack_from("<H", content, position + 34)[0]
+        local_header_offset = struct.unpack_from("<I", content, position + 42)[0]
+        if (
+            compressed_size == ZIP32_SENTINEL
+            or uncompressed_size == ZIP32_SENTINEL
+            or local_header_offset == ZIP32_SENTINEL
+            or member_disk != 0
+        ):
+            raise PreviewError("unsafe_archive")
+
+        record_end = (
+            position
+            + ZIP_CENTRAL_DIRECTORY_HEADER_SIZE
+            + filename_length
+            + extra_length
+            + member_comment_length
+        )
+        if record_end > end or local_header_offset + 4 > start:
+            raise PreviewError("unsafe_archive")
+        if content[local_header_offset : local_header_offset + 4] != ZIP_LOCAL_FILE_SIGNATURE:
+            raise PreviewError("unsafe_archive")
+
+        extra_start = position + ZIP_CENTRAL_DIRECTORY_HEADER_SIZE + filename_length
+        _validate_zip_extra_fields(content, start=extra_start, end=extra_start + extra_length)
+
+        total_compressed_bytes += compressed_size
+        total_uncompressed_bytes += uncompressed_size
+        if total_uncompressed_bytes > MAX_DOCX_UNCOMPRESSED_BYTES:
+            raise PreviewError("unsafe_archive")
+        if uncompressed_size and (
+            compressed_size == 0
+            or uncompressed_size / compressed_size > MAX_DOCX_COMPRESSION_RATIO
+        ):
+            raise PreviewError("unsafe_archive")
+
+        parsed_entries += 1
+        position = record_end
+
+    if parsed_entries != entry_count or position != end:
+        raise PreviewError("unsafe_archive")
+    if total_uncompressed_bytes and total_compressed_bytes == 0:
+        raise PreviewError("unsafe_archive")
+    if (
+        total_compressed_bytes
+        and total_uncompressed_bytes / total_compressed_bytes
+        > MAX_DOCX_COMPRESSION_RATIO
+    ):
+        raise PreviewError("unsafe_archive")
+
+
+def _validate_zip_extra_fields(content: bytes, *, start: int, end: int) -> None:
+    position = start
+    while position < end:
+        if position + 4 > end:
+            raise PreviewError("unsafe_archive")
+        field_id, field_size = struct.unpack_from("<HH", content, position)
+        position += 4
+        if position + field_size > end or field_id == ZIP64_EXTRA_FIELD_ID:
+            raise PreviewError("unsafe_archive")
+        position += field_size
 
 
 def _next_extracted_size(
