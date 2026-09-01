@@ -1,1 +1,12 @@
 .worktrees/
+.venv/
+node_modules/
+.env
+*.db
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.egg-info/
+dist/
+playwright-report/
+test-results/
