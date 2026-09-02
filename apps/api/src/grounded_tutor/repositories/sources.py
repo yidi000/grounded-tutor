@@ -116,7 +116,7 @@ class SourceRepository:
             "error_message": safe_error_message,
             "collection_id": collection_id,
         }
-        return self._update_optional(source_id, **values)
+        return self._update_record(source_id, **values)
 
     def list_for_workspace(self, workspace_id: UUID) -> tuple[bool, list[SourceSummary]]:
         try:
@@ -178,9 +178,6 @@ class SourceRepository:
                 outcome=SourcePersistenceOutcome.DEFINITELY_UNCOMMITTED
             )
         return source
-
-    def _update_optional(self, source_id: UUID, **values: object) -> SourceSummary | None:
-        return self._update_record(source_id, **values)
 
     def _update_record(self, source_id: UUID, **values: object) -> SourceSummary | None:
         try:

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, NoReturn
-from uuid import UUID
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from grounded_tutor.dependencies import get_workspace_service
 from grounded_tutor.domain.schemas import (
@@ -12,7 +11,8 @@ from grounded_tutor.domain.schemas import (
     WorkspaceResponse,
     WorkspaceUpdate,
 )
-from grounded_tutor.repositories.workspaces import WorkspacePersistenceError, WorkspaceSummary
+from grounded_tutor.repositories.workspaces import WorkspacePersistenceError
+from grounded_tutor.routers.common import api_error, parse_uuid
 from grounded_tutor.services.workspaces import (
     ExternalWorkspaceServiceError,
     WorkspaceNotFoundError,
@@ -57,10 +57,10 @@ async def create_workspace(
             vlm_model=payload.vlm_model,
         )
     except ExternalWorkspaceServiceError:
-        _api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+        api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
     except WorkspacePersistenceError:
-        _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
-    return _response(workspace)
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+    return WorkspaceResponse.model_validate(workspace)
 
 
 @router.get("", response_model=list[WorkspaceResponse], responses=LIST_ERROR_RESPONSES)
@@ -68,9 +68,9 @@ def list_workspaces(
     service: Annotated[WorkspaceService, Depends(get_workspace_service)]
 ) -> list[WorkspaceResponse]:
     try:
-        return [_response(workspace) for workspace in service.list()]
+        return [WorkspaceResponse.model_validate(workspace) for workspace in service.list()]
     except WorkspacePersistenceError:
-        _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
 @router.get(
@@ -82,7 +82,14 @@ def get_workspace(
     workspace_id: str,
     service: Annotated[WorkspaceService, Depends(get_workspace_service)],
 ) -> WorkspaceResponse:
-    return _read_workspace(_parse_workspace_id(workspace_id), service)
+    try:
+        return WorkspaceResponse.model_validate(
+            service.get(parse_uuid(workspace_id, "workspace_not_found"))
+        )
+    except WorkspaceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
+    except WorkspacePersistenceError:
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
 @router.patch(
@@ -96,39 +103,10 @@ def rename_workspace(
     service: Annotated[WorkspaceService, Depends(get_workspace_service)],
 ) -> WorkspaceResponse:
     try:
-        return _response(service.rename(_parse_workspace_id(workspace_id), title=payload.title))
+        return WorkspaceResponse.model_validate(
+            service.rename(parse_uuid(workspace_id, "workspace_not_found"), title=payload.title)
+        )
     except WorkspaceNotFoundError:
-        _api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
+        api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
     except WorkspacePersistenceError:
-        _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
-
-
-def _read_workspace(workspace_id: UUID, service: WorkspaceService) -> WorkspaceResponse:
-    try:
-        return _response(service.get(workspace_id))
-    except WorkspaceNotFoundError:
-        _api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
-    except WorkspacePersistenceError:
-        _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
-
-
-def _parse_workspace_id(workspace_id: str) -> UUID:
-    try:
-        return UUID(workspace_id)
-    except ValueError:
-        _api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
-
-
-def _response(workspace: WorkspaceSummary) -> WorkspaceResponse:
-    return WorkspaceResponse(
-        id=workspace.id,
-        title=workspace.title,
-        source_count=workspace.source_count,
-        ready_source_count=workspace.ready_source_count,
-        created_at=workspace.created_at,
-        updated_at=workspace.updated_at,
-    )
-
-
-def _api_error(status_code: int, code: str) -> NoReturn:
-    raise HTTPException(status_code=status_code, detail={"code": code})
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")

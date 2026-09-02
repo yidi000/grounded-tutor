@@ -539,6 +539,15 @@ git add apps/api
 git commit -m "feat: add grounded cited chat api"
 ```
 
+### Task 8A: Extend accepted study-material formats
+
+**Outcome:** The existing preview, ingestion, review, and acceptance flow also supports PPTX,
+XLSX, PNG, JPEG, and WebP.
+
+Write the implementation steps when Task 8A begins, after verifying FastGPT and local parser
+capabilities. Do not add parser, OCR, or vision dependencies early. The review-gated ingestion
+flow and user-visible estimated-versus-actual distinction remain unchanged.
+
 ### Task 9: Scaffold the React application and typed API client
 
 **Files:**

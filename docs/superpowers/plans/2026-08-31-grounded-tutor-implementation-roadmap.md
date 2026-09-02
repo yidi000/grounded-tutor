@@ -90,7 +90,7 @@ Implement the phases in order. Each phase is independently demonstrable and ends
 | Specification area | Implementation location |
 |---|---|
 | Workspace create, rename, view, switch, and isolation | Foundation Tasks 2, 4, 9, and 10; Trust Task 3 |
-| File/text upload, processing settings, estimated preview, FastGPT review, activation | Foundation Tasks 5–7 and 10 |
+| File/text upload, expanded PPTX/XLSX/image formats, processing settings, estimated preview, FastGPT review, activation | Foundation Tasks 5–7, 8A, and 10 |
 | Grounded ASK, refusal, language matching, citations | Foundation Tasks 8 and 11; Trust Task 1 |
 | Diagnostic invitation, consent, cooldown, inferred/confirmed profile separation | Learning Tasks 2 and 3 |
 | Three-to-five-concept PLAN, rebuild confirmation, reorder/skip | Learning Task 4 |

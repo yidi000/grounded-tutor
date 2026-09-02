@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from grounded_tutor.domain.ingestion import ChunkSettings, validate_public_chunk_settings
+from grounded_tutor.domain.ingestion import ChunkSettings, TextPreviewRequest
 from grounded_tutor.domain.models import SourceStatus, SourceType
 
 
@@ -76,22 +76,8 @@ class SourceResponse(BaseModel):
     updated_at: datetime
 
 
-class TextSourceCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    source_name: str = Field(min_length=1, max_length=255)
-    text: str
-    settings: ChunkSettings = Field(default_factory=ChunkSettings)
-
-    @field_validator("source_name", mode="before")
-    @classmethod
-    def trim_source_name(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-    @field_validator("settings", mode="before")
-    @classmethod
-    def require_public_setting_aliases(cls, value: object) -> object:
-        return validate_public_chunk_settings(value)
+class TextSourceCreate(TextPreviewRequest):
+    pass
 
 
 class ProcessedPreviewItemResponse(BaseModel):
