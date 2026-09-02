@@ -10,11 +10,13 @@
 
 ---
 
+> **2026-09-02 revision:** Execute Tasks 1–4 and 6 from this file. Execute the revised Tasks 5 and 7 from `2026-09-02-grounded-tutor-remaining-mvp.md` so LEARN/CHECK reuse the shared structured citation contract and Evidence Notebook shell.
+
 ### Task 1: Add activity and learning-domain persistence
 
 **Files:**
 - Modify: `apps/api/src/grounded_tutor/domain/models.py`
-- Create: `apps/api/alembic/versions/0004_learning_state.py`
+- Create: `apps/api/alembic/versions/0007_learning_state.py`
 - Create: `apps/api/src/grounded_tutor/domain/learning.py`
 - Create: `apps/api/tests/domain/test_learning_state.py`
 
@@ -37,7 +39,7 @@ Expected: FAIL because `ActivitySnapshot` does not exist.
 
 - [ ] **Step 3: Add types and tables**
 
-Use exact mode values `ASK`, `PLAN`, `LEARN`, and `CHECK`. Add tables: `ActivityState(workspace_id unique, active_mode, active_concept_id, suspended_activity JSON, return_checkpoint, nudge_cooldown_until, updated_at)`, `LearnerProfile(workspace_id unique, inferred_fields JSON, confirmed_fields JSON)`, `LearningPlan(id, workspace_id, goal, status, created_at)`, `Concept(id, plan_id, order, title, objective, status, evidence_refs JSON)`, `Assessment(id, concept_id nullable, kind, prompt, options JSON, answer_key, evidence_refs JSON)`, and `Attempt(id, assessment_id, response, result, status, created_at)`. Status enums must include `not_started`, `active`, `completed`, `needs_review`, and `not_assessed` where applicable.
+Use exact mode values `ASK`, `PLAN`, `LEARN`, and `CHECK`. Add tables: `ActivityState(workspace_id unique, active_mode, active_concept_id, suspended_activity JSON, return_checkpoint, nudge_cooldown_until, updated_at)`, `LearnerProfile(workspace_id unique, inferred_fields JSON, confirmed_fields JSON)`, `LearningPlan(id, workspace_id, goal, status, created_at)`, `Concept(id, plan_id, order, title, objective, status, evidence_refs JSON)`, `Assessment(id, concept_id nullable, kind, prompt, options JSON, answer_key, evidence_refs JSON, feedback_blocks JSON, citations JSON)`, and `Attempt(id, assessment_id, response, result, status, created_at)`. Status enums must include `not_started`, `active`, `completed`, `needs_review`, and `not_assessed` where applicable. Diagnostic and immediate-check answers remain server-only; public schemas never expose `answer_key`.
 
 - [ ] **Step 4: Run migration and domain tests**
 
@@ -84,7 +86,7 @@ Expected: FAIL because Route Policy and invitation policy do not exist.
 
 Precedence is: explicit UI event, active assessment/lesson, explicit textual intent, low-risk classifier, fallback ASK. Classifier output can suggest an invitation but cannot start CHECK, rebuild a plan, change Workspace, or call the network. Invite when the user explicitly says they are new/confused, asks how to learn, or asks for a test; otherwise require two related foundation questions in one conversation. The card has `开始诊断` and `继续提问`. Dismissal sets a 24-hour Workspace cooldown; acceptance clears the card and creates the diagnostic only once.
 
-When a low-risk classifier detects an unrelated topic, return a `suggest_new_workspace` action containing the proposed title; keep the current Workspace, messages, and activity unchanged until the user explicitly creates or selects another Workspace. Save classifier observations only in `LearnerProfile.inferred_fields`; save the user's stated goal and background only in `confirmed_fields`, and never overwrite confirmed values with an inference.
+When a low-risk classifier detects an unrelated topic, return `WorkspaceSuggestionAction(type="suggest_new_workspace", proposed_title="Linear Algebra")` with the classifier's bounded proposed title; keep the current Workspace, messages, and activity unchanged until the user explicitly creates or selects another Workspace. Save classifier observations only in `LearnerProfile.inferred_fields`; save the user's stated goal and background only in `confirmed_fields`, and never overwrite confirmed values with an inference.
 
 - [ ] **Step 4: Verify precedence and cooldown**
 
@@ -102,6 +104,9 @@ git commit -m "feat: add consented diagnostic invitation"
 ### Task 3: Generate and score the 3–5 question micro-diagnostic
 
 **Files:**
+- Modify: `apps/api/src/grounded_tutor/adapters/generation.py`
+- Modify: `apps/api/src/grounded_tutor/adapters/fakes.py`
+- Modify: `apps/api/src/grounded_tutor/dependencies.py`
 - Create: `apps/api/src/grounded_tutor/services/diagnostics.py`
 - Create: `apps/api/src/grounded_tutor/routers/diagnostics.py`
 - Modify: `apps/api/src/grounded_tutor/main.py`
@@ -127,7 +132,37 @@ Expected: FAIL because Diagnostic Service does not exist.
 
 - [ ] **Step 3: Implement start, answer, skip, and summary**
 
-`POST /diagnostics` requires explicit `consent=true`, a READY Source, a user goal, and optional self-described background. Retrieve representative material and generate 3–5 structured questions with answer key, explanation, concept label, and chunk evidence. `POST /diagnostics/{id}/answers` accepts exactly one question response and is idempotent. `skip=true` stores `not_assessed`, never incorrect. Summary returns concept-level results `understood`, `needs_review`, or `not_assessed`; it must not return a fake overall ability percentage.
+`POST /diagnostics` requires explicit `consent=true`, a READY Source, a user goal, and optional self-described background. Retrieve representative material and generate 3–5 structured questions with answer key, explanation, concept label, and chunk evidence through this typed extension of `GenerationPort`:
+
+```python
+@dataclass(frozen=True, slots=True)
+class GeneratedDiagnosticQuestion:
+    id: str
+    kind: Literal["single_choice", "structured_short"]
+    prompt: str
+    options: tuple[str, ...]
+    answer_key: tuple[str, ...]
+    explanation: str
+    concept_label: str
+    chunk_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedDiagnostic:
+    questions: tuple[GeneratedDiagnosticQuestion, ...]
+
+
+class GenerationPort(Protocol):
+    async def generate_diagnostic(
+        self,
+        goal: str,
+        background: str | None,
+        chunks: Sequence[RetrievedChunk],
+    ) -> GeneratedDiagnostic:
+        raise NotImplementedError
+```
+
+Validate the 3–5 bound, question kind, non-empty server-only answer key, and every chunk ID against READY retrieval before persistence; one generation retry is allowed, then return `insufficient_material`. `POST /diagnostics/{id}/answers` accepts exactly one question response and is idempotent. `skip=true` stores `not_assessed`, never incorrect. Summary returns concept-level results `understood`, `needs_review`, or `not_assessed`; it must not return a fake overall ability percentage.
 
 - [ ] **Step 4: Verify API and citation behavior**
 
@@ -145,6 +180,9 @@ git commit -m "feat: add grounded micro diagnostic"
 ### Task 4: Generate a finite grounded learning plan
 
 **Files:**
+- Modify: `apps/api/src/grounded_tutor/adapters/generation.py`
+- Modify: `apps/api/src/grounded_tutor/adapters/fakes.py`
+- Modify: `apps/api/src/grounded_tutor/dependencies.py`
 - Create: `apps/api/src/grounded_tutor/services/plans.py`
 - Create: `apps/api/src/grounded_tutor/routers/plans.py`
 - Create: `apps/api/tests/services/test_plans.py`
@@ -168,13 +206,39 @@ Expected: FAIL because Plan Service does not exist.
 
 - [ ] **Step 3: Implement plan creation and safe changes**
 
-Build 3–5 concepts from confirmed goal, diagnostic results, and READY source evidence. Every concept has title, objective, order, evidence refs, and an immediate-check type. Allow reorder and skip without deleting completed state. Require a `confirm_rebuild=true` request for full regeneration; preserve the old plan as `superseded` rather than overwriting it.
+Extend `GenerationPort` with a separate plan response rather than forcing concepts into answer blocks:
+
+```python
+@dataclass(frozen=True, slots=True)
+class GeneratedPlanConcept:
+    title: str
+    objective: str
+    chunk_ids: tuple[str, ...]
+    check_kind: Literal["single_choice", "structured_short"]
+
+
+@dataclass(frozen=True, slots=True)
+class GeneratedLearningPlan:
+    concepts: tuple[GeneratedPlanConcept, ...]
+
+
+class GenerationPort(Protocol):
+    async def generate_plan(
+        self,
+        goal: str,
+        diagnostic_summary: dict[str, str],
+        chunks: Sequence[RetrievedChunk],
+    ) -> GeneratedLearningPlan:
+        raise NotImplementedError
+```
+
+Build 3–5 concepts from confirmed goal, diagnostic results, and READY source evidence. Validate every generated chunk ID before persistence. Every concept has title, objective, order, evidence refs, and an immediate-check type. Allow skip without deleting completed state. Do not expose a reorder endpoint in P0. Require a `confirm_rebuild=true` request for full regeneration; preserve the old plan as `superseded` rather than overwriting it.
 
 - [ ] **Step 4: Verify constraints and history**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_plans.py -q`
 
-Expected: bounds, evidence, reorder, skip, completed preservation, rejected unconfirmed rebuild, and superseded history tests pass.
+Expected: bounds, evidence, skip, absence of a reorder route, completed preservation, rejected unconfirmed rebuild, and superseded history tests pass.
 
 - [ ] **Step 5: Commit**
 
@@ -244,10 +308,21 @@ git commit -m "feat: add learn ask check handlers"
 
 ```python
 @pytest.mark.asyncio
+async def test_question_during_diagnostic_returns_resume_action(orchestrator, active_diagnostic) -> None:
+    result = await orchestrator.handle_message(active_diagnostic.workspace_id, "What does this term mean?", "detour-0")
+    assert result.mode == "ASK"
+    assert result.actions[0].type == "resume_activity"
+    assert result.actions[0].checkpoint == active_diagnostic.checkpoint
+    resumed = await orchestrator.resume(active_diagnostic.workspace_id)
+    assert resumed.checkpoint == active_diagnostic.checkpoint
+
+
+@pytest.mark.asyncio
 async def test_question_during_check_returns_resume_action(orchestrator, active_check) -> None:
     result = await orchestrator.handle_message(active_check.workspace_id, "Why is median robust?", "detour-1")
     assert result.mode == "ASK"
-    assert result.actions[0].type == "resume_check"
+    assert result.actions[0].type == "resume_activity"
+    assert result.actions[0].checkpoint == active_check.checkpoint
     resumed = await orchestrator.resume(active_check.workspace_id)
     assert resumed.checkpoint == active_check.checkpoint
 ```
@@ -260,13 +335,13 @@ Expected: FAIL because Orchestrator does not exist.
 
 - [ ] **Step 3: Implement activity stack rules**
 
-During CHECK or LEARN, a direct content question suspends the activity, calls ASK, and returns a deterministic resume action. A page close persists only the last completed checkpoint; an unsubmitted answer never changes mastery. Workspace switching leaves the original ActivityState untouched. Resume loads the exact Concept/question and does not regenerate it.
+Keep the four persisted modes from Task 1: a diagnostic is a CHECK-mode assessment whose checkpoint kind is `diagnostic`. During a diagnostic assessment, an immediate CHECK, or LEARN, a direct content question suspends the activity, calls ASK, and returns `ResumeActivityAction(type="resume_activity", label="继续第 2 题", checkpoint="diagnostic-question-2")` with the actual label and checkpoint. A page close persists only the last completed checkpoint; an unsubmitted answer never changes mastery. Workspace switching leaves the original ActivityState untouched. Resume loads the exact diagnostic question, Concept, or check question and does not regenerate it.
 
 - [ ] **Step 4: Verify all cross-scenario transitions**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_orchestrator.py -q`
 
-Expected: CHECK→ASK→CHECK, LEARN→ASK→LEARN, skip, page reload, Workspace switch, and failed-handler rollback tests pass.
+Expected: diagnostic CHECK checkpoint→ASK→same diagnostic checkpoint, immediate CHECK→ASK→same check, LEARN→ASK→same concept, skip, page reload, Workspace switch, and failed-handler rollback tests pass.
 
 - [ ] **Step 5: Commit**
 

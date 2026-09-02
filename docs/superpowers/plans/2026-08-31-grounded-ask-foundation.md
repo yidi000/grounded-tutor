@@ -10,6 +10,8 @@
 
 ---
 
+> **2026-09-02 revision:** Tasks 1–6 are the implemented baseline. Do not execute Tasks 7–11 from this file; use `2026-09-02-grounded-tutor-remaining-mvp.md`, which incorporates the approved Evidence Notebook, capability, format, citation, and read-only demo contracts.
+
 ## File map
 
 - `Makefile`: repeatable install, run, and verification commands.
@@ -541,12 +543,9 @@ git commit -m "feat: add grounded cited chat api"
 
 ### Task 8A: Extend accepted study-material formats
 
-**Outcome:** The existing preview, ingestion, review, and acceptance flow also supports PPTX,
-XLSX, PNG, JPEG, and WebP.
-
-Write the implementation steps when Task 8A begins, after verifying FastGPT and local parser
-capabilities. Do not add parser, OCR, or vision dependencies early. The review-gated ingestion
-flow and user-visible estimated-versus-actual distinction remain unchanged.
+**Superseded:** Do not execute this historical section. The complete parser, capability,
+locator, live-probe, test, and STOP GATE instructions are in Foundation Task 8A of
+`2026-09-02-grounded-tutor-remaining-mvp.md`.
 
 ### Task 9: Scaffold the React application and typed API client
 

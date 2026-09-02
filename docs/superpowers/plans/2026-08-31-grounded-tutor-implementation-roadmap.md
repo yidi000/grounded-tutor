@@ -44,12 +44,13 @@ grounded-tutor/
 
 | Phase | Detailed plan | Runnable outcome | Exit command |
 |---|---|---|---|
-| 1 | `2026-08-31-grounded-ask-foundation.md` | Create Workspace, upload/paste material, review chunks, activate Source, ask cited questions | `make verify-foundation` |
+| 1 | `2026-08-31-grounded-ask-foundation.md` Tasks 1–6, then `2026-09-02-grounded-tutor-remaining-mvp.md` Foundation 7–11 | Create Workspace, upload/paste verified formats, review versions, activate Source, and use structured cited ASK in the Evidence Notebook | `make verify-foundation` |
 | 2 | `2026-08-31-trust-and-evaluation.md` | Citation enforcement, idempotency, isolation, traces, Bad Cases, automated evals | `make verify-trust` |
-| 3 | `2026-08-31-learning-loop.md` | Optional diagnostic, 3–5 concept plan, LEARN → ASK → CHECK, pause/resume | `make verify-learning` |
-| 4 | `2026-08-31-open-source-release.md` | Reproducible setup, safe sample data, CI, public release checklist | `make release-check` |
+| 3 | `2026-08-31-learning-loop.md` plus revised Learning 5/7 in `2026-09-02-grounded-tutor-remaining-mvp.md` | Optional diagnostic, 3–5 concept plan, cited LEARN → ASK → CHECK, pause/resume | `make verify-learning` |
+| 4 | `2026-08-31-open-source-release.md` plus the read-only demo addition in `2026-09-02-grounded-tutor-remaining-mvp.md` | Reproducible setup, deterministic no-write demo, safe sample data, CI, and public release checklist | `make release-check` |
+| 5 | Separate post-P0 account and cloud-workspace specification | Account/password access with owner-isolated persistent Workspaces; implementation starts only after its security design is approved | Defined by the future account specification |
 
-Implement the phases in order. Each phase is independently demonstrable and ends with a commit; do not start P1 webpage import or P2 whole-site sync before all four P0 phases pass.
+Implement Phases 1–4 in order. After every task in the referenced plans, run its checks, report the diff and results, and stop until the user says `继续`; the revised tasks make these gates explicit. Do not start Phase 5, P1 webpage import, or P2 whole-site sync before all four P0 phases pass.
 
 ## Locked technical decisions
 
@@ -91,14 +92,17 @@ Implement the phases in order. Each phase is independently demonstrable and ends
 |---|---|
 | Workspace create, rename, view, switch, and isolation | Foundation Tasks 2, 4, 9, and 10; Trust Task 3 |
 | File/text upload, expanded PPTX/XLSX/image formats, processing settings, estimated preview, FastGPT review, activation | Foundation Tasks 5–7, 8A, and 10 |
-| Grounded ASK, refusal, language matching, citations | Foundation Tasks 8 and 11; Trust Task 1 |
+| Capability-driven settings and creation-time model choices | Revised Foundation Task 7A and Task 10 |
+| Grounded ASK, structured blocks, refusal, language matching, Evidence Anchors | Revised Foundation Tasks 8 and 11; revised Trust Task 1 |
 | Diagnostic invitation, consent, cooldown, inferred/confirmed profile separation | Learning Tasks 2 and 3 |
-| Three-to-five-concept PLAN, rebuild confirmation, reorder/skip | Learning Task 4 |
+| Three-to-five-concept PLAN, rebuild confirmation, and skip | Learning Task 4 |
 | LEARN depth controls and immediate CHECK | Learning Task 5 |
 | Cross-scenario pause, resume, unrelated-topic suggestion | Learning Tasks 2, 6, and 7 |
 | Idempotency, trace, Bad Cases, prompt boundaries | Trust Tasks 2–4 |
 | 48 automated cases and honest measured report | Trust Task 5; Learning Task 7; Release Task 4 |
 | GitHub-safe open-source release | Trust Task 6 and all Release tasks |
+| Deterministic read-only public demo and local-upload handoff | Revised Foundation Tasks 9 and 11; Release addition |
+| Account/password and user-owned cloud Workspaces | Post-P0 Phase 5 after separate security and product design |
 | P1 single-page import/search and P2 site sync | Explicitly deferred until the P0 release gate passes |
 
 ## User-owned gates

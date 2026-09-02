@@ -10,6 +10,8 @@
 
 ---
 
+> **2026-09-02 revision:** Execute Tasks 1–5 and Task 6 Steps 1–4 below, then the `Release addition after Release Task 6 Step 4` in `2026-09-02-grounded-tutor-remaining-mvp.md`. After its STOP GATE and explicit user publication approval, execute Task 6 Step 5. The addition supplies the deterministic hosted read-only demo, no-write proof, and local-upload handoff before publication.
+
 ### Task 1: Add safe configuration templates and original sample material
 
 **Files:**
@@ -282,4 +284,4 @@ git commit -m "chore: add open source release gate"
 
 - [ ] **Step 5: Publish and verify a clean clone after confirmation**
 
-Create or connect only the approved repository, push the approved branch, wait for Actions, then clone to a new temporary directory and run `make verify-foundation`. Expected: push succeeds, CI is green, and the clean clone runs with fake adapters and no local secret files.
+Create or connect only the approved repository, push the approved branch, wait for CI and the Pages deployment, then clone to a new temporary directory and run `make verify-foundation`. Open the deployed Pages URL and verify the fixed sample answer, Evidence Anchor interaction, local-setup link, and absence of non-read network requests. Expected: push succeeds, CI and Pages are green, the hosted smoke test passes, and the clean clone runs with fake adapters and no local secret files.

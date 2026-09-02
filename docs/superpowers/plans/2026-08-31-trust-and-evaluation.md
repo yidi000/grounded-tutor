@@ -10,6 +10,8 @@
 
 ---
 
+> **2026-09-02 revision:** Foundation Task 8 now creates the shared structured grounding contract. Execute the `Trust Task 1 adjustment` in `2026-09-02-grounded-tutor-remaining-mvp.md` instead of Task 1 below; then continue with Tasks 2–6 from this file.
+
 ### Task 1: Enforce structured claims and citations
 
 **Files:**
@@ -65,7 +67,7 @@ git commit -m "feat: enforce grounded citations"
 
 **Files:**
 - Modify: `apps/api/src/grounded_tutor/domain/models.py`
-- Create: `apps/api/alembic/versions/0002_idempotency.py`
+- Create: `apps/api/alembic/versions/0005_idempotency.py`
 - Create: `apps/api/src/grounded_tutor/services/idempotency.py`
 - Modify: `apps/api/src/grounded_tutor/services/chat.py`
 - Create: `apps/api/tests/services/test_idempotency.py`
@@ -75,8 +77,8 @@ git commit -m "feat: enforce grounded citations"
 ```python
 @pytest.mark.asyncio
 async def test_same_key_returns_same_answer_without_second_generation(chat_service, fake_generation, workspace) -> None:
-    first = await chat_service.ask(workspace.id, "What is mean?", "key-1")
-    second = await chat_service.ask(workspace.id, "What is mean?", "key-1")
+    first = await chat_service.ask(workspace.id, "What is mean?", None, "key-1")
+    second = await chat_service.ask(workspace.id, "What is mean?", None, "key-1")
     assert second.message_id == first.message_id
     assert fake_generation.call_count == 1
 ```
@@ -158,7 +160,7 @@ git commit -m "test: enforce workspace trust boundaries"
 
 **Files:**
 - Modify: `apps/api/src/grounded_tutor/domain/models.py`
-- Create: `apps/api/alembic/versions/0003_traces_bad_cases.py`
+- Create: `apps/api/alembic/versions/0006_traces_bad_cases.py`
 - Create: `apps/api/src/grounded_tutor/services/tracing.py`
 - Create: `apps/api/src/grounded_tutor/routers/admin_evals.py`
 - Create: `apps/api/tests/services/test_tracing.py`
