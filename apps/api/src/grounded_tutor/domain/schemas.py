@@ -70,6 +70,10 @@ class SourceResponse(BaseModel):
     origin_uri: str | None
     status: SourceStatus
     version: int
+    lineage_id: UUID
+    replaces_source_id: UUID | None
+    superseded_at: datetime | None
+    deleted_at: datetime | None
     ingestion_config: ChunkSettings
     error_message: str | None
     created_at: datetime

@@ -51,6 +51,10 @@ def test_text_source_enters_review_and_returns_actual_processed_preview(
         "origin_uri",
         "status",
         "version",
+        "lineage_id",
+        "replaces_source_id",
+        "superseded_at",
+        "deleted_at",
         "ingestion_config",
         "error_message",
         "created_at",
@@ -320,7 +324,22 @@ def test_post_creation_external_failures_are_safe_and_persist_failed_collection(
     operation: str,
 ) -> None:
     _register_dataset(fake_fastgpt, seeded_workspace)
-    fake_fastgpt.failures[operation] = RuntimeError("private-content collection-secret api-key")
+    if operation == "set_collection_forbidden":
+        original_set = fake_fastgpt.set_collection_forbidden
+        attempts = 0
+
+        async def fail_forbid(collection_id: str, forbidden: bool) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts <= 2:
+                raise RuntimeError("private-content collection-secret api-key")
+            await original_set(collection_id, forbidden)
+
+        fake_fastgpt.set_collection_forbidden = fail_forbid
+    else:
+        fake_fastgpt.failures[operation] = RuntimeError(
+            "private-content collection-secret api-key"
+        )
 
     response = client.post(
         f"/api/workspaces/{seeded_workspace.id}/sources/text",

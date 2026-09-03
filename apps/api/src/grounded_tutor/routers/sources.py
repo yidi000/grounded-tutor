@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, NoReturn
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 
 from grounded_tutor.dependencies import get_source_service
 from grounded_tutor.domain.schemas import (
@@ -19,6 +19,7 @@ from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError
 from grounded_tutor.services.sources import (
     ExternalSourceServiceError,
     SourceIngestionResult,
+    SourceLifecycleConflictError,
     SourceNotFoundError,
     SourcePreviewUnavailableError,
     SourceService,
@@ -148,6 +149,139 @@ async def get_processed_preview(
         api_error(status.HTTP_404_NOT_FOUND, "source_not_found")
     except SourcePreviewUnavailableError:
         api_error(status.HTTP_409_CONFLICT, "processed_preview_unavailable")
+    except ExternalSourceServiceError:
+        api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+    except SourcePersistenceError:
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+
+
+@router.post(
+    "/{source_id}/accept",
+    response_model=SourceResponse,
+    responses=COMMON_ERROR_RESPONSES,
+)
+async def accept_source(
+    workspace_id: str,
+    source_id: str,
+    service: Annotated[SourceService, Depends(get_source_service)],
+) -> SourceResponse:
+    try:
+        source = await service.accept(
+            parse_uuid(workspace_id, "workspace_not_found"),
+            parse_uuid(source_id, "source_not_found"),
+        )
+        return SourceResponse.model_validate(source)
+    except SourceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "source_not_found")
+    except SourceLifecycleConflictError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code)
+    except WorkspaceIngestionBusyError:
+        api_error(status.HTTP_409_CONFLICT, "workspace_ingestion_busy")
+    except ExternalSourceServiceError:
+        api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+    except SourcePersistenceError:
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+
+
+@router.post(
+    "/{source_id}/reprocess/text",
+    response_model=SourceIngestionResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=COMMON_ERROR_RESPONSES,
+)
+async def reprocess_text_source(
+    workspace_id: str,
+    source_id: str,
+    payload: TextSourceCreate,
+    service: Annotated[SourceService, Depends(get_source_service)],
+) -> SourceIngestionResponse:
+    try:
+        result = await service.reprocess_text(
+            workspace_id=parse_uuid(workspace_id, "workspace_not_found"),
+            source_id=parse_uuid(source_id, "source_not_found"),
+            name=payload.source_name,
+            text=payload.text,
+            settings=payload.settings,
+        )
+        return _ingestion_response(result)
+    except SourceWorkspaceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
+    except SourceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "source_not_found")
+    except SourceLifecycleConflictError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code)
+    except WorkspaceIngestionBusyError:
+        api_error(status.HTTP_409_CONFLICT, "workspace_ingestion_busy")
+    except PreviewError as error:
+        _input_error(error)
+    except ExternalSourceServiceError:
+        api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+    except SourcePersistenceError:
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+
+
+@router.post(
+    "/{source_id}/reprocess/file",
+    response_model=SourceIngestionResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses=FILE_ERROR_RESPONSES,
+)
+async def reprocess_file_source(
+    workspace_id: str,
+    source_id: str,
+    service: Annotated[SourceService, Depends(get_source_service)],
+    file: Annotated[UploadFile, File()],
+    settings: Annotated[str, Form()] = "{}",
+) -> SourceIngestionResponse:
+    chunk_settings = parse_chunk_settings(settings)
+    content = await file.read(service.max_upload_bytes + 1)
+    try:
+        result = await service.reprocess_file(
+            workspace_id=parse_uuid(workspace_id, "workspace_not_found"),
+            source_id=parse_uuid(source_id, "source_not_found"),
+            filename=file.filename or "",
+            content=content,
+            settings=chunk_settings,
+        )
+        return _ingestion_response(result)
+    except SourceWorkspaceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
+    except SourceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "source_not_found")
+    except SourceLifecycleConflictError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code)
+    except WorkspaceIngestionBusyError:
+        api_error(status.HTTP_409_CONFLICT, "workspace_ingestion_busy")
+    except PreviewError as error:
+        _input_error(error)
+    except ExternalSourceServiceError:
+        api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+    except SourcePersistenceError:
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+
+
+@router.delete(
+    "/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=COMMON_ERROR_RESPONSES,
+)
+async def delete_source(
+    workspace_id: str,
+    source_id: str,
+    service: Annotated[SourceService, Depends(get_source_service)],
+) -> Response:
+    try:
+        await service.delete(
+            parse_uuid(workspace_id, "workspace_not_found"),
+            parse_uuid(source_id, "source_not_found"),
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except SourceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "source_not_found")
+    except SourceLifecycleConflictError as error:
+        api_error(status.HTTP_409_CONFLICT, error.code)
+    except WorkspaceIngestionBusyError:
+        api_error(status.HTTP_409_CONFLICT, "workspace_ingestion_busy")
     except ExternalSourceServiceError:
         api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
     except SourcePersistenceError:

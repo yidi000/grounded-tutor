@@ -3,18 +3,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
 from grounded_tutor.adapters.fastgpt import CollectionListItem, FastGPTPort, ProcessedChunk
 from grounded_tutor.domain.ingestion import ChunkSettings
-from grounded_tutor.domain.models import SourceType
+from grounded_tutor.domain.models import SourceStatus, SourceType
 from grounded_tutor.domain.schemas import (
     ProcessedPreviewItemResponse,
     ProcessedPreviewResponse,
 )
 from grounded_tutor.repositories.sources import (
+    SourceExternalRef,
     SourcePersistenceError,
     SourcePersistenceOutcome,
     SourceRepository,
@@ -57,6 +59,12 @@ class SourcePreviewUnavailableError(RuntimeError):
 
 class ExternalSourceServiceError(RuntimeError):
     pass
+
+
+class SourceLifecycleConflictError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +137,52 @@ class SourceService:
             ),
         )
 
+    async def reprocess_text(
+        self,
+        *,
+        workspace_id: UUID,
+        source_id: UUID,
+        name: str,
+        text: str,
+        settings: ChunkSettings,
+    ) -> SourceIngestionResult:
+        _validate_text(name, text, self.max_text_bytes)
+        return await self._ingest(
+            workspace_id=workspace_id,
+            name=name,
+            source_type=SourceType.TEXT,
+            settings=settings,
+            replaces_source_id=source_id,
+            create_collection=lambda dataset_id, remote_name, config: (
+                self._fastgpt.create_text_collection(
+                    dataset_id, remote_name, text, config
+                )
+            ),
+        )
+
+    async def reprocess_file(
+        self,
+        *,
+        workspace_id: UUID,
+        source_id: UUID,
+        filename: str,
+        content: bytes,
+        settings: ChunkSettings,
+    ) -> SourceIngestionResult:
+        safe_name = _validate_file(filename, content, self.max_upload_bytes)
+        return await self._ingest(
+            workspace_id=workspace_id,
+            name=safe_name,
+            source_type=SourceType.FILE,
+            settings=settings,
+            replaces_source_id=source_id,
+            create_collection=lambda dataset_id, remote_name, config: (
+                self._fastgpt.create_file_collection(
+                    dataset_id, remote_name, content, config
+                )
+            ),
+        )
+
     async def _ingest(
         self,
         *,
@@ -137,6 +191,7 @@ class SourceService:
         source_type: SourceType,
         settings: ChunkSettings,
         create_collection: Callable[[str, str, dict[str, object]], Awaitable[object]],
+        replaces_source_id: UUID | None = None,
     ) -> SourceIngestionResult:
         config = settings.model_dump(by_alias=True)
         source_id = uuid4()
@@ -147,6 +202,22 @@ class SourceService:
             dataset_id = self._repository.get_workspace_dataset_id(workspace_id)
             if dataset_id is None:
                 raise SourceWorkspaceNotFoundError
+            lineage_id: UUID | None = None
+            version = 1
+            if replaces_source_id is not None:
+                replaced = self._repository.get_for_workspace(
+                    workspace_id, replaces_source_id
+                )
+                if replaced is None:
+                    raise SourceNotFoundError
+                if replaced.summary.status is not SourceStatus.READY:
+                    raise SourceLifecycleConflictError("invalid_source_status")
+                if self._repository.has_pending_review(
+                    workspace_id, replaced.summary.lineage_id
+                ):
+                    raise SourceLifecycleConflictError("invalid_source_status")
+                lineage_id = replaced.summary.lineage_id
+                version = replaced.summary.version + 1
             collection_id: str | None = None
             remote_create_started = False
             try:
@@ -157,15 +228,18 @@ class SourceService:
                     source_type=source_type,
                     origin_uri=None,
                     ingestion_config=config,
+                    lineage_id=lineage_id,
+                    replaces_source_id=replaces_source_id,
+                    version=version,
                 )
                 remote_create_started = True
                 collection = await create_collection(dataset_id, remote_name, remote_config)
                 collection_id = _collection_id(collection)
-                await self._fastgpt.set_collection_forbidden(collection_id, True)
-                await self._confirm_collection_forbidden(
+                await self._set_collection_forbidden_confirmed(
                     dataset_id=dataset_id,
-                    marker=marker,
+                    source_id=source_id,
                     collection_id=collection_id,
+                    forbidden=True,
                 )
                 self._repository.set_collection_id(source.id, collection_id=collection_id)
                 chunks = await self._fastgpt.list_collection_data(
@@ -208,23 +282,58 @@ class SourceService:
                 processed_preview=_processed_preview(source, chunks),
             )
 
-    async def _confirm_collection_forbidden(
+    async def _set_collection_forbidden_confirmed(
         self,
         *,
         dataset_id: str,
-        marker: str,
+        source_id: UUID,
         collection_id: str,
+        forbidden: bool,
     ) -> None:
-        matches, complete = await self._find_marker_matches(dataset_id, marker)
-        if (
-            not complete
-            or len(matches) != 1
-            or matches[0].collection_id != collection_id
-            or not matches[0].forbidden
-        ):
-            raise ExternalSourceServiceError(
-                "Remote collection disable could not be confirmed."
-            )
+        marker = source_marker(source_id)
+        for _ in range(2):
+            with suppress(Exception):
+                await self._fastgpt.set_collection_forbidden(
+                    collection_id, forbidden
+                )
+            try:
+                matches, complete = await self._find_marker_matches(
+                    dataset_id, marker
+                )
+            except Exception:  # noqa: BLE001 - retry covers transient provider failure.
+                matches, complete = [], False
+            if (
+                complete
+                and len(matches) == 1
+                and matches[0].collection_id == collection_id
+                and matches[0].forbidden is forbidden
+            ):
+                return
+        raise ExternalSourceServiceError("Remote collection state could not be confirmed.")
+
+    async def _run_reconciliation_to_completion(
+        self, reconciliation: Awaitable[None]
+    ) -> None:
+        task = asyncio.create_task(reconciliation)
+        cancelled: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                if task.cancelled():
+                    break
+                cancelled = cancelled or error
+            except BaseException:
+                if not task.done():
+                    raise
+        try:
+            task.result()
+        except BaseException as error:
+            if cancelled is not None:
+                raise cancelled from error
+            raise
+        if cancelled is not None:
+            raise cancelled
 
     async def _reconcile_if_needed(
         self,
@@ -351,6 +460,255 @@ class SourceService:
         if not exists:
             raise SourceWorkspaceNotFoundError
         return sources
+
+    async def accept(self, workspace_id: UUID, source_id: UUID) -> SourceSummary:
+        async with self._locks.acquire(workspace_id):
+            dataset_id = self._repository.get_workspace_dataset_id(workspace_id)
+            if dataset_id is None:
+                raise SourceNotFoundError
+            source = self._repository.get_for_workspace(workspace_id, source_id)
+            if source is None:
+                raise SourceNotFoundError
+            if source.summary.status is not SourceStatus.REVIEW:
+                raise SourceLifecycleConflictError("invalid_source_status")
+            if source.collection_id is None:
+                raise SourceLifecycleConflictError("empty_processed_source")
+            try:
+                chunks = await self._fastgpt.list_collection_data(
+                    source.collection_id, page_size=1
+                )
+            except Exception as error:
+                raise ExternalSourceServiceError("Source acceptance failed.") from error
+            if not chunks:
+                raise SourceLifecycleConflictError("empty_processed_source")
+
+            replaced = None
+            if source.summary.replaces_source_id is not None:
+                replaced = self._repository.get_for_workspace(
+                    workspace_id, source.summary.replaces_source_id
+                )
+                if replaced is None or replaced.summary.status is not SourceStatus.READY:
+                    raise SourceLifecycleConflictError("invalid_source_status")
+
+            try:
+                await self._set_collection_forbidden_confirmed(
+                    dataset_id=dataset_id,
+                    source_id=source.summary.id,
+                    collection_id=source.collection_id,
+                    forbidden=False,
+                )
+                if replaced is not None and replaced.collection_id is not None:
+                    await self._set_collection_forbidden_confirmed(
+                        dataset_id=dataset_id,
+                        source_id=replaced.summary.id,
+                        collection_id=replaced.collection_id,
+                        forbidden=True,
+                    )
+            except asyncio.CancelledError:
+                await self._run_reconciliation_to_completion(
+                    self._align_accept_remote(
+                        dataset_id=dataset_id,
+                        source=source,
+                        replaced=replaced,
+                        accepted=False,
+                    )
+                )
+                raise
+            except Exception as error:
+                try:
+                    await self._run_reconciliation_to_completion(
+                        self._align_accept_remote(
+                            dataset_id=dataset_id,
+                            source=source,
+                            replaced=replaced,
+                            accepted=False,
+                        )
+                    )
+                except Exception as reconciliation_error:
+                    raise ExternalSourceServiceError(
+                        "Source acceptance reconciliation failed."
+                    ) from reconciliation_error
+                raise ExternalSourceServiceError("Source acceptance failed.") from error
+            try:
+                return self._repository.mark_ready(
+                    source_id,
+                    superseded_source_id=(
+                        replaced.summary.id if replaced is not None else None
+                    ),
+                )
+            except SourcePersistenceError as error:
+                durable = await self._reconcile_accept_persistence(
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    source=source,
+                    replaced=replaced,
+                    outcome=error.outcome,
+                )
+                if durable is not None:
+                    return durable
+                raise
+
+    async def _reconcile_accept_persistence(
+        self,
+        *,
+        workspace_id: UUID,
+        dataset_id: str,
+        source: SourceExternalRef,
+        replaced: SourceExternalRef | None,
+        outcome: SourcePersistenceOutcome,
+    ) -> SourceSummary | None:
+        durable: SourceExternalRef | None = None
+        accepted = False
+        if outcome is SourcePersistenceOutcome.UNKNOWN_OR_COMMITTED:
+            try:
+                durable = self._repository.get_historical_for_workspace(
+                    workspace_id, source.summary.id
+                )
+                durable_replaced = (
+                    self._repository.get_historical_for_workspace(
+                        workspace_id, replaced.summary.id
+                    )
+                    if replaced is not None
+                    else None
+                )
+            except SourcePersistenceError:
+                try:
+                    await self._run_reconciliation_to_completion(
+                        self._align_accept_remote(
+                            dataset_id=dataset_id,
+                            source=source,
+                            replaced=replaced,
+                            accepted=False,
+                        )
+                    )
+                except Exception as reconciliation_error:
+                    raise ExternalSourceServiceError(
+                        "Source acceptance reconciliation failed."
+                    ) from reconciliation_error
+                raise
+            accepted = durable is not None and durable.summary.status is SourceStatus.READY
+            if replaced is not None:
+                accepted = (
+                    accepted
+                    and durable_replaced is not None
+                    and durable_replaced.summary.superseded_at is not None
+                )
+        await self._run_reconciliation_to_completion(
+            self._align_accept_remote(
+                dataset_id=dataset_id,
+                source=source,
+                replaced=replaced,
+                accepted=accepted,
+            )
+        )
+        return durable.summary if accepted and durable is not None else None
+
+    async def _align_accept_remote(
+        self,
+        *,
+        dataset_id: str,
+        source: SourceExternalRef,
+        replaced: SourceExternalRef | None,
+        accepted: bool,
+    ) -> None:
+        if accepted and replaced is not None and replaced.collection_id is not None:
+            await self._set_collection_forbidden_confirmed(
+                dataset_id=dataset_id,
+                source_id=replaced.summary.id,
+                collection_id=replaced.collection_id,
+                forbidden=True,
+            )
+        if source.collection_id is not None:
+            await self._set_collection_forbidden_confirmed(
+                dataset_id=dataset_id,
+                source_id=source.summary.id,
+                collection_id=source.collection_id,
+                forbidden=not accepted,
+            )
+        if not accepted and replaced is not None and replaced.collection_id is not None:
+            await self._set_collection_forbidden_confirmed(
+                dataset_id=dataset_id,
+                source_id=replaced.summary.id,
+                collection_id=replaced.collection_id,
+                forbidden=False,
+            )
+
+    async def delete(self, workspace_id: UUID, source_id: UUID) -> None:
+        async with self._locks.acquire(workspace_id):
+            dataset_id = self._repository.get_workspace_dataset_id(workspace_id)
+            if dataset_id is None:
+                raise SourceNotFoundError
+            source = self._repository.get_for_workspace(workspace_id, source_id)
+            if source is None:
+                raise SourceNotFoundError
+            if source.summary.status is SourceStatus.READY and self._repository.has_pending_review(
+                workspace_id, source.summary.lineage_id
+            ):
+                raise SourceLifecycleConflictError("invalid_source_status")
+            if source.collection_id is not None:
+                try:
+                    await self._set_collection_forbidden_confirmed(
+                        dataset_id=dataset_id,
+                        source_id=source.summary.id,
+                        collection_id=source.collection_id,
+                        forbidden=True,
+                    )
+                except asyncio.CancelledError:
+                    await self._run_reconciliation_to_completion(
+                        self._align_deleted_remote(
+                            dataset_id=dataset_id,
+                            source=source,
+                            deleted=False,
+                        )
+                    )
+                    raise
+                except Exception as error:
+                    try:
+                        await self._align_deleted_remote(
+                            dataset_id=dataset_id,
+                            source=source,
+                            deleted=False,
+                        )
+                    except Exception as reconciliation_error:
+                        raise ExternalSourceServiceError(
+                            "Source deletion reconciliation failed."
+                        ) from reconciliation_error
+                    raise ExternalSourceServiceError("Source deletion failed.") from error
+            try:
+                self._repository.mark_deleted(source_id)
+            except SourcePersistenceError as error:
+                deleted = False
+                if error.outcome is SourcePersistenceOutcome.UNKNOWN_OR_COMMITTED:
+                    durable = self._repository.get_historical_for_workspace(
+                        workspace_id, source_id
+                    )
+                    deleted = (
+                        durable is not None and durable.summary.deleted_at is not None
+                    )
+                await self._align_deleted_remote(
+                    dataset_id=dataset_id,
+                    source=source,
+                    deleted=deleted,
+                )
+                if deleted:
+                    return
+                raise
+
+    async def _align_deleted_remote(
+        self,
+        *,
+        dataset_id: str,
+        source: SourceExternalRef,
+        deleted: bool,
+    ) -> None:
+        if source.collection_id is None:
+            return
+        await self._set_collection_forbidden_confirmed(
+            dataset_id=dataset_id,
+            source_id=source.summary.id,
+            collection_id=source.collection_id,
+            forbidden=deleted or source.summary.status is not SourceStatus.READY,
+        )
 
     async def processed_preview(
         self, workspace_id: UUID, source_id: UUID

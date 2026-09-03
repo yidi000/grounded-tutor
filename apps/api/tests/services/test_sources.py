@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import event as sqlalchemy_event
@@ -12,12 +14,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from grounded_tutor.adapters.fakes import FakeCollection, FakeFastGPT
-from grounded_tutor.adapters.fastgpt import DatasetRef, ExternalServiceError
+from grounded_tutor.adapters.fastgpt import DatasetRef, ExternalServiceError, ProcessedChunk
 from grounded_tutor.config import Settings
 from grounded_tutor.db import create_database_engine
 from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.domain.models import Base, Source, SourceStatus, SourceType, Workspace
-from grounded_tutor.repositories.sources import SourceRepository
+from grounded_tutor.repositories.sources import (
+    SourcePersistenceError,
+    SourcePersistenceOutcome,
+    SourceRepository,
+)
 from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError, WorkspaceLockRegistry
 from grounded_tutor.services.sources import (
     ExternalSourceServiceError,
@@ -63,6 +69,538 @@ def source_context(source_engine) -> tuple[Callable[[], Session], FakeFastGPT, W
         session.close()
 
 
+def _seed_review_replacement(
+    source_engine,
+) -> tuple[FakeFastGPT, Workspace, UUID, UUID]:
+    lineage_id = uuid4()
+    new_id = uuid4()
+    with Session(source_engine, expire_on_commit=False) as session:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        session.add(workspace)
+        session.flush()
+        old = Source(
+            id=lineage_id,
+            workspace_id=workspace.id,
+            name="notes",
+            source_type=SourceType.TEXT,
+            collection_id="collection-old",
+            status=SourceStatus.READY,
+            lineage_id=lineage_id,
+            ingestion_config={},
+        )
+        new = Source(
+            id=new_id,
+            workspace_id=workspace.id,
+            name="notes v2",
+            source_type=SourceType.TEXT,
+            collection_id="collection-new",
+            status=SourceStatus.REVIEW,
+            lineage_id=lineage_id,
+            replaces_source_id=lineage_id,
+            version=2,
+            ingestion_config={},
+        )
+        session.add_all([old, new])
+        session.commit()
+    fake = FakeFastGPT()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    fake.collections["collection-old"] = FakeCollection(
+        dataset_id=workspace.dataset_id,
+        name=f"{source_marker(lineage_id)}--notes",
+        content="old",
+        config={},
+        chunks=[ProcessedChunk("chunk-old", "Old", "")],
+        tags=(source_marker(lineage_id),),
+        forbidden=False,
+    )
+    fake.collections["collection-new"] = FakeCollection(
+        dataset_id=workspace.dataset_id,
+        name=f"{source_marker(new_id)}--notes-v2",
+        content="new",
+        config={},
+        chunks=[ProcessedChunk("chunk-new", "New", "")],
+        tags=(source_marker(new_id),),
+        forbidden=True,
+    )
+    return fake, workspace, lineage_id, new_id
+
+
+def _seed_ready_source(source_engine) -> tuple[FakeFastGPT, Workspace, UUID]:
+    source_id = uuid4()
+    with Session(source_engine, expire_on_commit=False) as session:
+        workspace = Workspace(title="Statistics", dataset_id="dataset-statistics")
+        session.add(workspace)
+        session.flush()
+        source = Source(
+            id=source_id,
+            workspace_id=workspace.id,
+            name="notes",
+            source_type=SourceType.TEXT,
+            collection_id="collection-ready",
+            status=SourceStatus.READY,
+            lineage_id=source_id,
+            ingestion_config={},
+        )
+        session.add(source)
+        session.commit()
+    fake = FakeFastGPT()
+    fake.datasets[workspace.dataset_id] = DatasetRef(workspace.dataset_id)
+    fake.collections["collection-ready"] = FakeCollection(
+        dataset_id=workspace.dataset_id,
+        name=f"{source_marker(source_id)}--notes",
+        content="ready",
+        config={},
+        chunks=[ProcessedChunk("chunk-ready", "Ready", "")],
+        tags=(source_marker(source_id),),
+        forbidden=False,
+    )
+    return fake, workspace, source_id
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_survives_repeated_outer_cancellation(source_context) -> None:
+    _, _, _, service = source_context
+    started = asyncio.Event()
+    release = asyncio.Event()
+    completed = False
+
+    async def reconcile() -> None:
+        nonlocal completed
+        started.set()
+        await release.wait()
+        completed = True
+
+    outer = asyncio.create_task(
+        service._run_reconciliation_to_completion(reconcile())
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    outer.cancel()
+    await asyncio.sleep(0)
+    outer.cancel()
+    await asyncio.sleep(0)
+    waited_for_child = not outer.done()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await outer
+
+    assert waited_for_child
+    assert completed
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_child_failure_preserves_outer_cancellation(
+    source_context,
+) -> None:
+    _, _, _, service = source_context
+    started = asyncio.Event()
+    release = asyncio.Event()
+    unretrieved: list[dict[str, object]] = []
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+
+    async def reconcile() -> None:
+        started.set()
+        await release.wait()
+        raise RuntimeError("private child failure")
+
+    loop.set_exception_handler(lambda _loop, context: unretrieved.append(context))
+    try:
+        outer = asyncio.create_task(
+            service._run_reconciliation_to_completion(reconcile())
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        outer.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await outer
+        await asyncio.sleep(0)
+    finally:
+        loop.set_exception_handler(previous_handler)
+
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert "private child failure" in str(caught.value.__cause__)
+    assert not any(
+        context.get("message") == "Task exception was never retrieved"
+        for context in unretrieved
+    )
+
+
+@pytest.mark.asyncio
+async def test_accept_flush_failure_restores_remote_review_state(source_engine) -> None:
+    fake, workspace, old_id, new_id = _seed_review_replacement(source_engine)
+
+    class MarkReadyFlushFails(Session):
+        def flush(self, objects=None) -> None:
+            if any(
+                isinstance(instance, Source)
+                and instance.id == new_id
+                and instance.status is SourceStatus.READY
+                for instance in self.dirty
+            ):
+                raise SQLAlchemyError("private mark-ready detail")
+            super().flush(objects)
+
+    session = MarkReadyFlushFails(bind=source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(SourcePersistenceError):
+            await service.accept(workspace.id, new_id)
+    finally:
+        session.close()
+
+    assert fake.collections["collection-new"].forbidden is True
+    assert fake.collections["collection-old"].forbidden is False
+    with Session(source_engine) as check:
+        old = check.get(Source, old_id)
+        new = check.get(Source, new_id)
+    assert old is not None and old.superseded_at is None
+    assert new is not None and new.status is SourceStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_accept_commit_then_error_uses_durable_ready_state(source_engine) -> None:
+    fake, workspace, old_id, new_id = _seed_review_replacement(source_engine)
+
+    class MarkReadyCommitThenError(Session):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.failed = False
+            sqlalchemy_event.listen(self, "after_commit", self._fail_once)
+
+        def _fail_once(self, session) -> None:
+            if not self.failed:
+                self.failed = True
+                raise SQLAlchemyError("private ambiguous commit detail")
+
+    session = MarkReadyCommitThenError(bind=source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        result = await service.accept(workspace.id, new_id)
+    finally:
+        session.close()
+
+    assert result.status is SourceStatus.READY
+    assert fake.collections["collection-new"].forbidden is False
+    assert fake.collections["collection-old"].forbidden is True
+    with Session(source_engine) as check:
+        old = check.get(Source, old_id)
+        new = check.get(Source, new_id)
+    assert old is not None and old.superseded_at is not None
+    assert new is not None and new.status is SourceStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_accept_confirms_remote_enable_applied_before_timeout(source_engine) -> None:
+    fake, workspace, _, new_id = _seed_review_replacement(source_engine)
+    original_set = fake.set_collection_forbidden
+    timed_out = False
+
+    async def apply_then_timeout(collection_id: str, forbidden: bool) -> None:
+        nonlocal timed_out
+        await original_set(collection_id, forbidden)
+        if collection_id == "collection-new" and not forbidden and not timed_out:
+            timed_out = True
+            raise ExternalServiceError(
+                service="fastgpt",
+                category="timeout",
+                safe_message="FastGPT request failed.",
+            )
+
+    fake.set_collection_forbidden = apply_then_timeout
+    with Session(source_engine, expire_on_commit=False) as session:
+        service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+        result = await service.accept(workspace.id, new_id)
+
+    assert result.status is SourceStatus.READY
+    assert fake.collections["collection-new"].forbidden is False
+    assert fake.collections["collection-old"].forbidden is True
+
+
+@pytest.mark.asyncio
+async def test_accept_retries_failed_compensation_until_remote_is_confirmed(
+    source_engine,
+) -> None:
+    fake, workspace, _, new_id = _seed_review_replacement(source_engine)
+    original_set = fake.set_collection_forbidden
+    compensation_attempts = 0
+
+    async def fail_old_and_first_compensation(
+        collection_id: str, forbidden: bool
+    ) -> None:
+        nonlocal compensation_attempts
+        if collection_id == "collection-old" and forbidden:
+            raise RuntimeError("private old disable failure")
+        if collection_id == "collection-new" and forbidden:
+            compensation_attempts += 1
+            if compensation_attempts == 1:
+                raise RuntimeError("private first compensation failure")
+        await original_set(collection_id, forbidden)
+
+    fake.set_collection_forbidden = fail_old_and_first_compensation
+    with Session(source_engine, expire_on_commit=False) as session:
+        service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+        with pytest.raises(ExternalSourceServiceError) as caught:
+            await service.accept(workspace.id, new_id)
+
+    assert "private" not in str(caught.value)
+    assert compensation_attempts == 2
+    assert fake.collections["collection-new"].forbidden is True
+    assert fake.collections["collection-old"].forbidden is False
+
+
+@pytest.mark.asyncio
+async def test_accept_cancellation_restores_remote_review_state(source_engine) -> None:
+    fake, workspace, _, new_id = _seed_review_replacement(source_engine)
+    original_set = fake.set_collection_forbidden
+    enabled = asyncio.Event()
+
+    async def apply_enable_then_block(collection_id: str, forbidden: bool) -> None:
+        await original_set(collection_id, forbidden)
+        if collection_id == "collection-new" and not forbidden:
+            enabled.set()
+            await asyncio.Event().wait()
+
+    fake.set_collection_forbidden = apply_enable_then_block
+    with Session(source_engine, expire_on_commit=False) as session:
+        service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+        task = asyncio.create_task(service.accept(workspace.id, new_id))
+        await asyncio.wait_for(enabled.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert fake.collections["collection-new"].forbidden is True
+    assert fake.collections["collection-old"].forbidden is False
+    with Session(source_engine) as check:
+        new = check.get(Source, new_id)
+    assert new is not None and new.status is SourceStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_accept_persistence_compensation_survives_cancellation(
+    source_engine,
+) -> None:
+    fake, workspace, old_id, new_id = _seed_review_replacement(source_engine)
+    compensation_started = asyncio.Event()
+    release_compensation = asyncio.Event()
+    original_set = fake.set_collection_forbidden
+
+    class MarkReadyFlushFails(Session):
+        def flush(self, objects=None) -> None:
+            if any(
+                isinstance(instance, Source)
+                and instance.id == new_id
+                and instance.status is SourceStatus.READY
+                for instance in self.dirty
+            ):
+                raise SQLAlchemyError("private mark-ready detail")
+            super().flush(objects)
+
+    async def block_compensation(collection_id: str, forbidden: bool) -> None:
+        if collection_id == "collection-new" and forbidden:
+            compensation_started.set()
+            await release_compensation.wait()
+        await original_set(collection_id, forbidden)
+
+    fake.set_collection_forbidden = block_compensation
+    session = MarkReadyFlushFails(bind=source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        task = asyncio.create_task(service.accept(workspace.id, new_id))
+        await asyncio.wait_for(compensation_started.wait(), timeout=1)
+        task.cancel()
+        await asyncio.sleep(0)
+        waited_for_compensation = not task.done()
+        release_compensation.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        session.close()
+
+    assert waited_for_compensation
+    assert fake.collections["collection-new"].forbidden is True
+    assert fake.collections["collection-old"].forbidden is False
+    with Session(source_engine) as check:
+        old = check.get(Source, old_id)
+        new = check.get(Source, new_id)
+    assert old is not None and old.superseded_at is None
+    assert new is not None and new.status is SourceStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_accept_remote_failure_compensation_survives_cancellation(
+    source_engine,
+) -> None:
+    fake, workspace, old_id, new_id = _seed_review_replacement(source_engine)
+    compensation_started = asyncio.Event()
+    release_compensation = asyncio.Event()
+    original_set = fake.set_collection_forbidden
+
+    async def fail_old_and_block_compensation(
+        collection_id: str, forbidden: bool
+    ) -> None:
+        if collection_id == "collection-old" and forbidden:
+            raise RuntimeError("private old disable failure")
+        if collection_id == "collection-new" and forbidden:
+            compensation_started.set()
+            await release_compensation.wait()
+        await original_set(collection_id, forbidden)
+
+    fake.set_collection_forbidden = fail_old_and_block_compensation
+    with Session(source_engine, expire_on_commit=False) as session:
+        service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+        task = asyncio.create_task(service.accept(workspace.id, new_id))
+        await asyncio.wait_for(compensation_started.wait(), timeout=1)
+        task.cancel()
+        await asyncio.sleep(0)
+        waited_for_compensation = not task.done()
+        release_compensation.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert waited_for_compensation
+    assert fake.collections["collection-new"].forbidden is True
+    assert fake.collections["collection-old"].forbidden is False
+    with Session(source_engine) as check:
+        old = check.get(Source, old_id)
+        new = check.get(Source, new_id)
+    assert old is not None and old.superseded_at is None
+    assert new is not None and new.status is SourceStatus.REVIEW
+
+
+@pytest.mark.asyncio
+async def test_accept_durable_reread_failure_restores_conservative_remote_state(
+    source_engine,
+) -> None:
+    fake, workspace, old_id, new_id = _seed_review_replacement(source_engine)
+
+    class MarkReadyCommitThenError(Session):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            sqlalchemy_event.listen(self, "after_commit", self._fail)
+
+        def _fail(self, session) -> None:
+            raise SQLAlchemyError("private ambiguous commit detail")
+
+    class HistoricalReadFails(SourceRepository):
+        def get_historical_for_workspace(self, workspace_id, source_id):
+            raise SourcePersistenceError(
+                outcome=SourcePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            )
+
+    session = MarkReadyCommitThenError(bind=source_engine, expire_on_commit=False)
+    service = SourceService(HistoricalReadFails(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(SourcePersistenceError) as caught:
+            await service.accept(workspace.id, new_id)
+    finally:
+        session.close()
+
+    assert "private" not in str(caught.value)
+    assert fake.collections["collection-new"].forbidden is True
+    assert fake.collections["collection-old"].forbidden is False
+    with Session(source_engine) as check:
+        old = check.get(Source, old_id)
+        new = check.get(Source, new_id)
+    assert old is not None and old.superseded_at is not None
+    assert new is not None and new.status is SourceStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_delete_flush_failure_restores_remote_enabled_state(source_engine) -> None:
+    fake, workspace, source_id = _seed_ready_source(source_engine)
+
+    class MarkDeletedFlushFails(Session):
+        def flush(self, objects=None) -> None:
+            if any(
+                isinstance(instance, Source) and instance.deleted_at is not None
+                for instance in self.dirty
+            ):
+                raise SQLAlchemyError("private mark-deleted detail")
+            super().flush(objects)
+
+    session = MarkDeletedFlushFails(bind=source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(SourcePersistenceError):
+            await service.delete(workspace.id, source_id)
+    finally:
+        session.close()
+
+    assert fake.collections["collection-ready"].forbidden is False
+    with Session(source_engine) as check:
+        stored = check.get(Source, source_id)
+    assert stored is not None and stored.deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_delete_commit_then_error_uses_durable_deleted_state(source_engine) -> None:
+    fake, workspace, source_id = _seed_ready_source(source_engine)
+
+    class MarkDeletedCommitThenError(Session):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.failed = False
+            sqlalchemy_event.listen(self, "after_commit", self._fail_once)
+
+        def _fail_once(self, session) -> None:
+            if not self.failed:
+                self.failed = True
+                raise SQLAlchemyError("private ambiguous delete detail")
+
+    session = MarkDeletedCommitThenError(bind=source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        await service.delete(workspace.id, source_id)
+    finally:
+        session.close()
+
+    assert fake.collections["collection-ready"].forbidden is True
+    with Session(source_engine) as check:
+        stored = check.get(Source, source_id)
+    assert stored is not None and stored.deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_restore_failure_returns_safe_error_without_local_delete(
+    source_engine,
+) -> None:
+    fake, workspace, source_id = _seed_ready_source(source_engine)
+
+    class MarkDeletedFlushFails(Session):
+        def flush(self, objects=None) -> None:
+            if any(
+                isinstance(instance, Source) and instance.deleted_at is not None
+                for instance in self.dirty
+            ):
+                raise SQLAlchemyError("private mark-deleted detail")
+            super().flush(objects)
+
+    original_set = fake.set_collection_forbidden
+
+    async def fail_restore(collection_id: str, forbidden: bool) -> None:
+        if not forbidden:
+            raise RuntimeError("private restore detail")
+        await original_set(collection_id, forbidden)
+
+    fake.set_collection_forbidden = fail_restore
+    session = MarkDeletedFlushFails(bind=source_engine, expire_on_commit=False)
+    service = SourceService(SourceRepository(session), fake, WorkspaceLockRegistry())
+    try:
+        with pytest.raises(ExternalSourceServiceError) as caught:
+            await service.delete(workspace.id, source_id)
+    finally:
+        session.close()
+
+    assert "private" not in str(caught.value)
+    assert fake.collections["collection-ready"].forbidden is True
+    with Session(source_engine) as check:
+        stored = check.get(Source, source_id)
+    assert stored is not None and stored.deleted_at is None
+
+
 @pytest.mark.asyncio
 async def test_new_collection_is_disabled_until_acceptance(source_context) -> None:
     _, fake, workspace, service = source_context
@@ -87,6 +625,125 @@ async def test_new_collection_is_disabled_until_acceptance(source_context) -> No
         ("list_collections", "dataset-statistics", 0, 30, marker),
         ("list_collection_data", "collection-1", 30),
     ]
+
+
+def test_ready_collection_ids_excludes_noncurrent_and_other_workspace_sources(
+    source_context,
+) -> None:
+    session_factory, _, workspace, _ = source_context
+    with session_factory() as session:
+        other = Workspace(title="Other", dataset_id="dataset-other")
+        session.add(other)
+        session.flush()
+        active = Source(
+            workspace_id=workspace.id,
+            name="active",
+            source_type=SourceType.TEXT,
+            collection_id="active",
+            status=SourceStatus.READY,
+            ingestion_config={},
+        )
+        session.add_all(
+            [
+                active,
+                Source(
+                    workspace_id=workspace.id,
+                    name="review",
+                    source_type=SourceType.TEXT,
+                    collection_id="review",
+                    status=SourceStatus.REVIEW,
+                    ingestion_config={},
+                ),
+                Source(
+                    workspace_id=workspace.id,
+                    name="superseded",
+                    source_type=SourceType.TEXT,
+                    collection_id="superseded",
+                    status=SourceStatus.READY,
+                    superseded_at=datetime.now(UTC),
+                    ingestion_config={},
+                ),
+                Source(
+                    workspace_id=workspace.id,
+                    name="deleted",
+                    source_type=SourceType.TEXT,
+                    collection_id="deleted",
+                    status=SourceStatus.READY,
+                    deleted_at=datetime.now(UTC),
+                    ingestion_config={},
+                ),
+                Source(
+                    workspace_id=workspace.id,
+                    name="missing collection",
+                    source_type=SourceType.TEXT,
+                    status=SourceStatus.READY,
+                    ingestion_config={},
+                ),
+                Source(
+                    workspace_id=other.id,
+                    name="other",
+                    source_type=SourceType.TEXT,
+                    collection_id="other",
+                    status=SourceStatus.READY,
+                    ingestion_config={},
+                ),
+            ]
+        )
+        session.commit()
+
+        sources = SourceRepository(session).ready_collection_ids(workspace.id)
+
+    assert list(sources) == ["active"]
+    assert sources["active"].id == active.id
+
+
+def test_historical_lookup_explicitly_returns_hidden_source_in_its_workspace(
+    source_context,
+) -> None:
+    session_factory, _, workspace, _ = source_context
+    with session_factory() as session:
+        other = Workspace(title="Other", dataset_id="dataset-other")
+        superseded = Source(
+            workspace_id=workspace.id,
+            name="version 1",
+            source_type=SourceType.TEXT,
+            collection_id="collection-v1",
+            status=SourceStatus.READY,
+            ingestion_config={},
+        )
+        deleted = Source(
+            workspace_id=workspace.id,
+            name="deleted",
+            source_type=SourceType.TEXT,
+            collection_id="collection-deleted",
+            status=SourceStatus.READY,
+            ingestion_config={},
+        )
+        session.add_all([other, superseded, deleted])
+        session.commit()
+        repository = SourceRepository(session)
+        repository.mark_superseded(superseded.id)
+        repository.mark_deleted(deleted.id)
+
+        exists, visible = repository.list_for_workspace(workspace.id)
+
+        assert exists is True
+        assert visible == []
+        assert repository.get_for_workspace(workspace.id, superseded.id) is None
+        historical = repository.get_historical_for_workspace(
+            workspace.id, superseded.id
+        )
+        deleted_history = repository.get_historical_for_workspace(
+            workspace.id, deleted.id
+        )
+        assert historical is not None
+        assert historical.summary.id == superseded.id
+        assert historical.summary.superseded_at is not None
+        assert historical.collection_id == "collection-v1"
+        assert deleted_history is not None
+        assert deleted_history.summary.id == deleted.id
+        assert deleted_history.summary.deleted_at is not None
+        assert repository.get_historical_for_workspace(other.id, superseded.id) is None
 
 
 @pytest.mark.asyncio
@@ -449,7 +1106,7 @@ async def test_forbid_and_compensation_failures_return_safe_failure_state(
     assert source is not None
     assert source.status is SourceStatus.FAILED
     assert source.collection_id == "collection-1"
-    assert fake.set_collection_forbidden.await_count == 2
+    assert fake.set_collection_forbidden.await_count == 3
 
 
 @pytest.mark.asyncio

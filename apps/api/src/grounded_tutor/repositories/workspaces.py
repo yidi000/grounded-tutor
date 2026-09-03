@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -136,7 +136,14 @@ def _summary_query():
             Workspace.created_at,
             Workspace.updated_at,
         )
-        .outerjoin(Source, Source.workspace_id == Workspace.id)
+        .outerjoin(
+            Source,
+            and_(
+                Source.workspace_id == Workspace.id,
+                Source.superseded_at.is_(None),
+                Source.deleted_at.is_(None),
+            ),
+        )
         .group_by(Workspace.id, Workspace.title, Workspace.created_at, Workspace.updated_at)
         .order_by(Workspace.created_at.desc(), Workspace.id.desc())
     )

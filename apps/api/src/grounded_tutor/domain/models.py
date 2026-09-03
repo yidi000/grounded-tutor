@@ -86,6 +86,17 @@ class Source(Base):
         default=SourceStatus.UPLOADING,
     )
     version: Mapped[int] = mapped_column(nullable=False, default=1)
+    lineage_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=False,
+        index=True,
+        default=lambda context: context.get_current_parameters()["id"],
+    )
+    replaces_source_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("sources.id", ondelete="RESTRICT"), nullable=True
+    )
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ingestion_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     error_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

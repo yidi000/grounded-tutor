@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -115,6 +116,49 @@ def test_list_and_detail_workspace_include_aggregated_source_counts(
     assert listed.json()[0]["ready_source_count"] == 1
     assert detail.status_code == 200
     assert detail.json()["source_count"] == 2
+    assert detail.json()["ready_source_count"] == 1
+
+
+def test_workspace_counts_exclude_deleted_and_superseded_sources(
+    client: TestClient,
+    api_session_factory: Callable[[], object],
+    seeded_workspace: Workspace,
+) -> None:
+    now = datetime.now(UTC)
+    with api_session_factory() as session:
+        session.add_all(
+            [
+                Source(
+                    workspace_id=seeded_workspace.id,
+                    name="current.txt",
+                    source_type=SourceType.TEXT,
+                    status=SourceStatus.READY,
+                    ingestion_config={},
+                ),
+                Source(
+                    workspace_id=seeded_workspace.id,
+                    name="old.txt",
+                    source_type=SourceType.TEXT,
+                    status=SourceStatus.READY,
+                    superseded_at=now,
+                    ingestion_config={},
+                ),
+                Source(
+                    workspace_id=seeded_workspace.id,
+                    name="deleted.txt",
+                    source_type=SourceType.TEXT,
+                    status=SourceStatus.REVIEW,
+                    deleted_at=now,
+                    ingestion_config={},
+                ),
+            ]
+        )
+        session.commit()
+
+    detail = client.get(f"/api/workspaces/{seeded_workspace.id}")
+
+    assert detail.status_code == 200
+    assert detail.json()["source_count"] == 1
     assert detail.json()["ready_source_count"] == 1
 
 

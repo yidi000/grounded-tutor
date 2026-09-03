@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -351,3 +351,48 @@ def test_alembic_upgrade_current_check_downgrade_and_reupgrade(
     finally:
         engine.dispose()
     command.check(config)
+
+
+def test_source_lifecycle_migration_backfills_existing_source_lineage(
+    temporary_database_url: str,
+) -> None:
+    config = get_alembic_config(Settings(database_url=temporary_database_url))
+    command.upgrade(config, "0001_workspace_sources")
+    workspace_id = "10000000000000000000000000000000"
+    source_id = "20000000000000000000000000000000"
+    engine = create_database_engine(Settings(database_url=temporary_database_url))
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO workspaces (id, title, dataset_id) VALUES (?, ?, ?)",
+                (workspace_id, "Legacy", "dataset-legacy"),
+            )
+            connection.exec_driver_sql(
+                """
+                INSERT INTO sources
+                    (id, workspace_id, name, source_type, status, version, ingestion_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (source_id, workspace_id, "legacy.txt", "text", "ready", 1, "{}"),
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+    migrated_engine = create_database_engine(
+        Settings(database_url=temporary_database_url)
+    )
+    try:
+        with Session(migrated_engine) as session:
+            source = session.scalar(select(Source))
+        lineage_column = next(
+            column
+            for column in inspect(migrated_engine).get_columns("sources")
+            if column["name"] == "lineage_id"
+        )
+    finally:
+        migrated_engine.dispose()
+
+    assert source is not None
+    assert source.lineage_id == source.id
+    assert lineage_column["nullable"] is False
