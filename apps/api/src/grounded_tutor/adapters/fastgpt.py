@@ -307,6 +307,8 @@ class FastGPTClient:
             if request.extension_background:
                 payload["datasetSearchExtensionBg"] = request.extension_background
         data = _list(await self._request("POST", "/api/core/dataset/searchTest", json=payload))
+        if len(data) > request.limit:
+            _malformed()
         return [
             RetrievedChunk(
                 chunk_id=_required_string(_object(item), "id", "_id"),

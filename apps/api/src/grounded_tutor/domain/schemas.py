@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from grounded_tutor.domain.answers import Citation, GroundedContentBlock, SuggestedAction
 from grounded_tutor.domain.errors import PublicErrorCode
 from grounded_tutor.domain.ingestion import ChunkSettings, TextPreviewRequest
 from grounded_tutor.domain.models import SourceStatus, SourceType
@@ -133,3 +134,27 @@ class SourceIngestionCapabilities(BaseModel):
     settings: list[CapabilityItem]
     workspace_models: list[CapabilityItem]
     read_only_demo: bool
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conversation_id: UUID | None = None
+    message: str = Field(min_length=1, max_length=8_000)
+    idempotency_key: str = Field(min_length=1, max_length=255)
+
+    @field_validator("message", "idempotency_key", mode="before")
+    @classmethod
+    def trim_required_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
+class ChatResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    conversation_id: UUID
+    message_id: UUID
+    status: Literal["ok", "insufficient_material"]
+    answer_blocks: tuple[GroundedContentBlock, ...]
+    citations: tuple[Citation, ...]
+    suggested_actions: tuple[SuggestedAction, ...]

@@ -606,6 +606,32 @@ async def test_search_rejects_non_finite_or_boolean_scores(score: object) -> Non
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_search_rejects_more_results_than_requested_limit() -> None:
+    item = {
+        "id": "chunk-1",
+        "collectionId": "collection-1",
+        "sourceName": "notes",
+        "q": "q",
+        "a": "a",
+        "score": 0.9,
+    }
+    respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(
+            200,
+            json={"code": 200, "data": [item, {**item, "id": "chunk-2"}]},
+        )
+    )
+    client = FastGPTClient("https://fastgpt.test", "secret")
+
+    with pytest.raises(ExternalServiceError) as caught:
+        await client.search(SearchRequest("dataset-1", "question", limit=1))
+
+    assert caught.value.category == "malformed_response"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
 @pytest.mark.parametrize("field", ["id", "collectionId", "sourceName"])
 async def test_search_rejects_empty_required_result_identifiers(field: str) -> None:
     item = {

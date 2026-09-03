@@ -328,6 +328,44 @@ def test_live_fastgpt_is_shared_for_lifespan_and_closed_without_network(
     assert fastgpt.is_closed
 
 
+def test_lifespan_closes_generation_when_fastgpt_close_fails(
+    api_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_order: list[str] = []
+
+    class FailingCloseFastGPT:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            close_order.append("fastgpt")
+            raise RuntimeError("fastgpt close failed")
+
+    class RecordingCloseGeneration:
+        def __init__(self, *_args: object) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            close_order.append("generation")
+
+    monkeypatch.setattr(main_module, "FastGPTClient", FailingCloseFastGPT)
+    monkeypatch.setattr(
+        main_module, "OpenAICompatibleGenerationClient", RecordingCloseGeneration
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_settings",
+        lambda: Settings(database_url=str(api_engine.url), external_mode="live"),
+    )
+
+    with pytest.raises(RuntimeError, match="fastgpt close failed"), TestClient(
+        main_module.app
+    ):
+        pass
+
+    assert close_order == ["fastgpt", "generation"]
+
+
 @pytest.mark.asyncio
 async def test_add_failure_rolls_back_and_compensates_exact_dataset(api_engine) -> None:
     class AddFailingSession(Session):

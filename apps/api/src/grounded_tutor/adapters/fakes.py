@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,7 +16,8 @@ from grounded_tutor.adapters.fastgpt import (
     RetrievedChunk,
     SearchRequest,
 )
-from grounded_tutor.adapters.generation import GeneratedAnswer, GenerationPort
+from grounded_tutor.adapters.generation import GenerationPort, GenerationRequest
+from grounded_tutor.domain.answers import GeneratedAnswer, GeneratedBlock
 
 
 @dataclass(slots=True)
@@ -200,12 +201,27 @@ class FakeFastGPT(FastGPTPort):
 class FakeGeneration(GenerationPort):
     """Configurable generation substitute which records user-visible inputs."""
 
-    def __init__(self, answer: GeneratedAnswer) -> None:
-        self.answer = answer
-        self.calls: list[tuple[str, tuple[RetrievedChunk, ...]]] = []
+    def __init__(self, *responses: GeneratedAnswer | BaseException) -> None:
+        self.responses = list(responses)
+        self.calls: list[GenerationRequest] = []
 
-    async def generate_answer(
-        self, question: str, chunks: Sequence[RetrievedChunk]
-    ) -> GeneratedAnswer:
-        self.calls.append((question, tuple(chunks)))
-        return self.answer
+    async def generate_content(self, request: GenerationRequest) -> GeneratedAnswer:
+        self.calls.append(request)
+        if self.responses:
+            response = self.responses.pop(0)
+            if isinstance(response, BaseException):
+                raise response
+            return response
+        if not request.chunks:
+            return GeneratedAnswer(blocks=())
+        chunk = request.chunks[0]
+        return GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1",
+                    kind="answer" if request.mode == "ASK" else "explanation",
+                    text=chunk.a or chunk.q,
+                    chunk_ids=(chunk.chunk_id,),
+                ),
+            )
+        )

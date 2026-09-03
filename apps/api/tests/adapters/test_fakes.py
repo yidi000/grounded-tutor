@@ -2,7 +2,8 @@ import pytest
 
 from grounded_tutor.adapters.fakes import FakeFastGPT, FakeGeneration
 from grounded_tutor.adapters.fastgpt import RetrievedChunk, SearchRequest
-from grounded_tutor.adapters.generation import GeneratedAnswer, GeneratedClaim
+from grounded_tutor.adapters.generation import GenerationRequest
+from grounded_tutor.domain.answers import GeneratedAnswer, GeneratedBlock
 
 
 @pytest.mark.asyncio
@@ -29,19 +30,29 @@ async def test_fake_fastgpt_retains_collections_data_forbid_and_deletes_dataset(
 
 @pytest.mark.asyncio
 async def test_fake_generation_records_calls_and_returns_configured_answer() -> None:
-    answer = GeneratedAnswer("The mean is an average.", [GeneratedClaim("mean", ["chunk-1"])])
+    answer = GeneratedAnswer(
+        blocks=(
+            GeneratedBlock(
+                id="block-1",
+                kind="answer",
+                text="The mean is an average.",
+                chunk_ids=("chunk-1",),
+            ),
+        )
+    )
     fake = FakeGeneration(answer)
     source = FakeFastGPT()
     dataset = await source.create_dataset("Statistics")
     await source.create_text_collection(dataset.dataset_id, "means", "mean", {})
     chunks = await source.search(SearchRequest(dataset.dataset_id, "mean"))
 
-    result = await fake.generate_answer("What is the mean?", chunks)
+    request = GenerationRequest("ASK", "What is the mean?", tuple(chunks))
+    result = await fake.generate_content(request)
 
     assert result == answer
-    assert isinstance(result.claims, tuple)
-    assert isinstance(result.claims[0].chunk_ids, tuple)
-    assert fake.calls == [("What is the mean?", tuple(chunks))]
+    assert isinstance(result.blocks, tuple)
+    assert isinstance(result.blocks[0].chunk_ids, tuple)
+    assert fake.calls == [request]
 
 
 @pytest.mark.asyncio

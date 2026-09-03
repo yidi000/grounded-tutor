@@ -233,7 +233,7 @@ def test_persistence_defaults_and_constraints(temporary_engine: Engine) -> None:
             role="user",
             mode="ask",
             content="What is a distribution?",
-            idempotency_key="request-1",
+            idempotency_key=None,
         )
         session.add(message)
         session.commit()
@@ -246,6 +246,8 @@ def test_persistence_defaults_and_constraints(temporary_engine: Engine) -> None:
         assert conversation.id is not None
         assert message.id is not None
         assert message.citations == []
+        assert message.content_blocks is None
+        assert message.idempotency_key is None
 
         session.add(Workspace(title="Duplicate", dataset_id="dataset-1"))
         with pytest.raises(IntegrityError):
@@ -306,6 +308,19 @@ def test_persistence_defaults_and_constraints(temporary_engine: Engine) -> None:
                 mode="ask",
                 content="A distribution describes possible values.",
                 citations=[],
+                content_blocks=[],
+                idempotency_key="request-1",
+            )
+        )
+        session.commit()
+        session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                mode="ask",
+                content="A duplicate answer.",
+                citations=[],
+                content_blocks=[],
                 idempotency_key="request-1",
             )
         )
@@ -323,6 +338,7 @@ def test_persistence_defaults_and_constraints(temporary_engine: Engine) -> None:
                 mode="ask",
                 content="What is a mean?",
                 citations=[],
+                content_blocks=None,
                 idempotency_key="request-1",
             )
         )
@@ -443,3 +459,89 @@ def test_workspace_model_choice_migration_preserves_legacy_rows_and_round_trips(
         migrated_engine.dispose()
 
     assert {"vector_model", "agent_model", "vlm_model"} <= column_names
+
+
+def test_message_content_blocks_migration_preserves_legacy_rows_and_round_trips(
+    temporary_database_url: str,
+) -> None:
+    config = get_alembic_config(Settings(database_url=temporary_database_url))
+    command.upgrade(config, "0003_workspace_model_choices")
+    workspace_id = "40000000000000000000000000000000"
+    conversation_id = "50000000000000000000000000000000"
+    message_id = "60000000000000000000000000000000"
+    engine = create_database_engine(Settings(database_url=temporary_database_url))
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO workspaces (id, title, dataset_id) VALUES (?, ?, ?)",
+                (workspace_id, "Legacy", "dataset-legacy-message"),
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO conversations (id, workspace_id) VALUES (?, ?)",
+                (conversation_id, workspace_id),
+            )
+            connection.exec_driver_sql(
+                """
+                INSERT INTO messages
+                    (id, conversation_id, role, mode, content, citations, idempotency_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    message_id,
+                    conversation_id,
+                    "assistant",
+                    "ask",
+                    "Legacy answer",
+                    "[]",
+                    "legacy-key",
+                ),
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+    migrated = create_database_engine(Settings(database_url=temporary_database_url))
+    try:
+        columns = {column["name"]: column for column in inspect(migrated).get_columns("messages")}
+        with Session(migrated) as session:
+            legacy = session.get(Message, UUID(message_id))
+            assert legacy is not None
+            assert legacy.content == "Legacy answer"
+            assert legacy.idempotency_key == "legacy-key"
+            assert legacy.content_blocks is None
+            session.add(
+                Message(
+                    conversation_id=UUID(conversation_id),
+                    role="user",
+                    mode="ask",
+                    content="New question",
+                    citations=[],
+                    content_blocks=None,
+                    idempotency_key=None,
+                )
+            )
+            session.commit()
+    finally:
+        migrated.dispose()
+
+    assert columns["content_blocks"]["nullable"] is True
+    assert columns["idempotency_key"]["nullable"] is True
+
+    command.downgrade(config, "0003_workspace_model_choices")
+    downgraded = create_database_engine(Settings(database_url=temporary_database_url))
+    try:
+        columns = {column["name"]: column for column in inspect(downgraded).get_columns("messages")}
+        with downgraded.connect() as connection:
+            rows = connection.exec_driver_sql(
+                "SELECT content, idempotency_key FROM messages ORDER BY content"
+            ).all()
+    finally:
+        downgraded.dispose()
+
+    assert "content_blocks" not in columns
+    assert columns["idempotency_key"]["nullable"] is False
+    assert [row[0] for row in rows] == ["Legacy answer", "New question"]
+    assert all(row[1] for row in rows)
+
+    command.upgrade(config, "head")
+    command.check(config)

@@ -10,7 +10,13 @@ from grounded_tutor.adapters.fastgpt import (
     RetrievedChunk,
     SearchRequest,
 )
-from grounded_tutor.adapters.generation import GeneratedAnswer, GeneratedClaim, GenerationPort
+from grounded_tutor.adapters.generation import (
+    GenerationPort,
+    GenerationRequest,
+    InvalidGenerationOutput,
+    OpenAICompatibleGenerationClient,
+)
+from grounded_tutor.domain.answers import GeneratedAnswer, GeneratedBlock
 
 __all__ = [
     "CollectionRef",
@@ -19,8 +25,11 @@ __all__ = [
     "FastGPTClient",
     "FastGPTPort",
     "GeneratedAnswer",
-    "GeneratedClaim",
+    "GeneratedBlock",
     "GenerationPort",
+    "GenerationRequest",
+    "InvalidGenerationOutput",
+    "OpenAICompatibleGenerationClient",
     "ProcessedChunk",
     "RetrievedChunk",
     "SearchRequest",
