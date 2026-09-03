@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from grounded_tutor.domain.answers import SourceLocator
+
 PUBLIC_CHUNK_SETTING_ALIASES = frozenset(
     {
         "trainingType",
@@ -93,6 +95,7 @@ class PreviewItem(BaseModel):
     text: str
     character_count: int
     truncated: bool = False
+    locator: SourceLocator | None = None
 
 
 class PreviewWarning(BaseModel):

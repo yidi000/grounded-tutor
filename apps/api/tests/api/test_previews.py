@@ -1,5 +1,6 @@
 import json
 from collections.abc import Callable
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -8,6 +9,8 @@ import grounded_tutor.main as main_module
 from grounded_tutor.adapters.fakes import FakeFastGPT
 from grounded_tutor.config import Settings, get_settings
 from grounded_tutor.domain.models import Source, Workspace
+
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def test_text_preview_returns_estimated_chunks_for_existing_workspace(
@@ -44,12 +47,14 @@ def test_text_preview_returns_estimated_chunks_for_existing_workspace(
                 "text": "Mean is an average.",
                 "character_count": 19,
                 "truncated": False,
+                "locator": None,
             },
             {
                 "position": 2,
                 "text": "Median is the middle value.",
                 "character_count": 27,
                 "truncated": False,
+                "locator": None,
             },
         ],
         "warnings": [],
@@ -80,6 +85,68 @@ def test_file_preview_accepts_strict_settings_json_in_multipart(
     assert response.json()["source_name"] == "statistics.txt"
     assert [item["text"] for item in response.json()["items"]] == ["Mean.", "Median."]
     assert response.json()["warnings"] == [{"code": "qa_generated_after_processing"}]
+
+
+def test_office_preview_returns_estimated_typed_locations(
+    client: TestClient,
+    seeded_workspace: Workspace,
+) -> None:
+    pptx = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/source-previews/file",
+        files={"file": ("slides.pptx", (FIXTURES / "slides.pptx").read_bytes())},
+        data={"settings": "{}"},
+    )
+    xlsx = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/source-previews/file",
+        files={"file": ("scores.xlsx", (FIXTURES / "workbook.xlsx").read_bytes())},
+        data={"settings": "{}"},
+    )
+
+    assert pptx.status_code == 200
+    assert pptx.json()["authority"] == "estimated"
+    assert pptx.json()["items"][0]["locator"] == {
+        "kind": "pptx",
+        "slide": 1,
+        "title": "Chunking",
+    }
+    assert xlsx.status_code == 200
+    assert xlsx.json()["items"][0]["locator"] == {
+        "kind": "xlsx",
+        "sheet": "Week 1",
+        "cell_range": "A1:B3",
+    }
+
+
+def test_image_preview_is_disabled_by_default_and_enabled_by_setting(
+    client: TestClient,
+    seeded_workspace: Workspace,
+) -> None:
+    content = (FIXTURES / "diagram.png").read_bytes()
+    disabled = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/source-previews/file",
+        files={"file": ("diagram.png", content, "image/png")},
+        data={"settings": "{}"},
+    )
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        supports_image_files=True
+    )
+    enabled = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/source-previews/file",
+        files={"file": ("diagram.png", content, "image/png")},
+        data={"settings": "{}"},
+    )
+
+    assert disabled.status_code == 415
+    assert enabled.status_code == 200
+    assert enabled.json()["items"] == [
+        {
+            "position": 1,
+            "text": "PNG image, 64 x 32 pixels",
+            "character_count": 25,
+            "truncated": False,
+            "locator": {"kind": "image", "filename": "diagram.png", "region": None},
+        }
+    ]
 
 
 def test_preview_openapi_exposes_only_exact_fastgpt_setting_aliases(
@@ -120,6 +187,7 @@ def test_text_preview_qa_mode_never_returns_invented_qa_fields(
         "text",
         "character_count",
         "truncated",
+        "locator",
     }
     assert response.json()["warnings"] == [{"code": "qa_generated_after_processing"}]
 

@@ -12,19 +12,27 @@ from grounded_tutor.domain.answers import (
     GroundedContentBlock,
     ImageLocator,
     PdfLocator,
+    PptxLocator,
     SourceLocator,
+    XlsxLocator,
 )
 from grounded_tutor.domain.models import SourceStatus, SourceType
 from grounded_tutor.repositories.sources import SourceSummary
 from grounded_tutor.services.grounding import ReadyChunk, ground_generated_answer
+from grounded_tutor.services.sources import serialize_locator_marker
 
 
-def _source(identifier: int, name: str, version: int = 1) -> SourceSummary:
+def _source(
+    identifier: int,
+    name: str,
+    version: int = 1,
+    source_type: SourceType = SourceType.TEXT,
+) -> SourceSummary:
     return SourceSummary(
         id=UUID(int=identifier),
         workspace_id=UUID(int=100),
         name=name,
-        source_type=SourceType.TEXT,
+        source_type=source_type,
         origin_uri=None,
         status=SourceStatus.READY,
         version=version,
@@ -195,3 +203,433 @@ def test_citation_locator_is_a_discriminated_union() -> None:
     )
 
     assert citation.locator == ImageLocator(filename="notes.png", region="top-left")
+
+
+@pytest.mark.parametrize(
+    ("name", "marker", "expected"),
+    [
+        (
+            "slides.pptx",
+            '[[GT_LOCATOR {"kind":"pptx","slide":1,"title":"Chunking"}]]',
+            PptxLocator(slide=1, title="Chunking"),
+        ),
+        (
+            "scores.xlsx",
+            '[[GT_LOCATOR {"cell_range":"A1:B3","kind":"xlsx","sheet":"Week 1"}]]',
+            XlsxLocator(sheet="Week 1", cell_range="A1:B3"),
+        ),
+    ],
+)
+def test_generated_office_markers_are_stripped_into_typed_locators(
+    name: str,
+    marker: str,
+    expected: PptxLocator | XlsxLocator,
+) -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1",
+            "collection-1",
+            "provider-name",
+            f"{marker}\nEvidence body",
+            "",
+            0.9,
+        ),
+        source=_source(1, name, source_type=SourceType.FILE),
+        retrieval_position=1,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1",
+                    kind="answer",
+                    text="Supported",
+                    chunk_ids=("chunk-1",),
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].excerpt == "Evidence body"
+    assert result.citations[0].locator == expected
+
+
+def test_generated_qa_answer_marker_is_trusted_and_question_is_retained() -> None:
+    marker = '[[GT_LOCATOR {"kind":"pptx","slide":1,"title":"Chunking"}]]'
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1",
+            "collection-1",
+            "provider",
+            "What is chunking?",
+            f"{marker}\nEvidence body",
+            0.9,
+        ),
+        source=_source(1, "slides.pptx", source_type=SourceType.FILE),
+        retrieval_position=1,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == PptxLocator(slide=1, title="Chunking")
+    assert result.citations[0].excerpt == "What is chunking?\nEvidence body"
+
+
+@pytest.mark.parametrize(
+    ("name", "marker", "expected", "split"),
+    [
+        (name, marker, expected, split)
+        for name, marker, expected in [
+            (
+                "slides.pptx",
+                '[[GT_LOCATOR {"kind":"pptx","slide":1,"title":"Chunking"}]]',
+                PptxLocator(slide=1, title="Chunking"),
+            ),
+            (
+                "scores.xlsx",
+                '[[GT_LOCATOR {"cell_range":"A1:B3","kind":"xlsx","sheet":"Week 1"}]]',
+                XlsxLocator(sheet="Week 1", cell_range="A1:B3"),
+            ),
+            (
+                "slides.pptx",
+                serialize_locator_marker(
+                    PptxLocator(
+                        slide=2,
+                        title="Before ]] and [[GT_LOCATOR after",
+                    )
+                ),
+                PptxLocator(
+                    slide=2,
+                    title="Before ]] and [[GT_LOCATOR after",
+                ),
+            ),
+        ]
+        for split in range(1, len(marker))
+    ],
+)
+def test_generated_office_marker_every_qa_boundary_split_is_reconstructed(
+    name: str,
+    marker: str,
+    expected: PptxLocator | XlsxLocator,
+    split: int,
+) -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1",
+            "collection-1",
+            "provider",
+            marker[:split],
+            f"{marker[split:]}\nEvidence body",
+            0.9,
+        ),
+        source=_source(1, name, source_type=SourceType.FILE),
+        retrieval_position=1,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == expected
+    assert result.citations[0].excerpt == "Evidence body"
+    assert "GT_LOCATOR" not in result.citations[0].excerpt
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        '"slide":"one"}]]\nEvidence body',
+        '"slide":1\nEvidence body',
+    ],
+)
+def test_invalid_or_incomplete_office_marker_split_does_not_leak(
+    answer: str,
+) -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1",
+            "collection-1",
+            "provider",
+            '[[GT_LOCATOR {"kind":"pptx",',
+            answer,
+            0.9,
+        ),
+        source=_source(1, "slides.pptx", source_type=SourceType.FILE),
+        retrieval_position=3,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 3")
+    assert result.citations[0].excerpt == "Evidence body"
+    assert "GT_LOCATOR" not in result.citations[0].excerpt
+    assert '"slide"' not in result.citations[0].excerpt
+
+
+@pytest.mark.parametrize(
+    "chunk_text",
+    [
+        '[[GT_LOCATOR {"kind":"pptx","slide":"one"}]]\nEvidence body',
+        '[[GT_LOCATOR {"kind":"pdf","page":9}]]\nEvidence body',
+        (
+            '[[GT_LOCATOR {"kind":"pptx","slide":1}]]\n'
+            '[[GT_LOCATOR {"kind":"pptx","slide":2}]]\nEvidence body'
+        ),
+        '[[GT_LOCATOR {"kind":"xlsx","sheet":"Forged"}]]\nEvidence body',
+    ],
+)
+def test_invalid_ambiguous_or_mismatched_markers_fall_back_without_leaking(
+    chunk_text: str,
+) -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1", "collection-1", "provider", chunk_text, "", 0.9
+        ),
+        source=_source(1, "slides.pptx", source_type=SourceType.FILE),
+        retrieval_position=4,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1",
+                    kind="answer",
+                    text="Supported",
+                    chunk_ids=("chunk-1",),
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 4")
+    assert "GT_LOCATOR" not in result.citations[0].excerpt
+    assert result.citations[0].excerpt == "Evidence body"
+
+
+@pytest.mark.parametrize(
+    "marker_like_text",
+    [
+        'x[[GT_LOCATOR{"kind":"pptx","slide":5}]]',
+        '[[GT_LOCATOR{"kind":"pptx","slide":5}]]',
+        '[[GT_LOCATOR\t{"kind":"pptx","slide":6}]]',
+    ],
+)
+def test_marker_like_user_text_requires_the_exact_generated_prefix(
+    marker_like_text: str,
+) -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1",
+            "collection-1",
+            "provider",
+            f"{marker_like_text}\nEvidence body",
+            "",
+            0.9,
+        ),
+        source=_source(1, "slides.pptx", source_type=SourceType.FILE),
+        retrieval_position=5,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 5")
+    assert result.citations[0].excerpt == "Evidence body"
+    assert "GT_LOCATOR" not in result.citations[0].excerpt
+
+
+def test_semantically_valid_noncanonical_marker_is_not_trusted() -> None:
+    marker = '[[GT_LOCATOR {"slide":1,"kind":"pptx"}]]'
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1", "collection-1", "provider", f"{marker}\nEvidence", "", 0.9
+        ),
+        source=_source(1, "slides.pptx", source_type=SourceType.FILE),
+        retrieval_position=6,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 6")
+    assert result.citations[0].excerpt == "Evidence"
+
+
+def test_valid_looking_marker_from_non_office_source_is_untrusted() -> None:
+    marker = '[[GT_LOCATOR {"kind":"pptx","slide":999}]]'
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1", "collection-1", "provider", f"{marker}\nUser content", "", 0.9
+        ),
+        source=_source(1, "notes.txt", source_type=SourceType.FILE),
+        retrieval_position=2,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 2")
+    assert result.citations[0].excerpt == f"{marker}\nUser content"
+
+
+@pytest.mark.parametrize(
+    ("source_type", "name"),
+    [
+        (SourceType.TEXT, "Pasted text"),
+        (SourceType.FILE, "notes.txt"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("q", "a", "expected"),
+    [
+        ("[[GT_LOCATOR", "", "[[GT_LOCATOR"),
+        (
+            "Question with [[GT_LOCATOR evidence",
+            "Answer body",
+            "Question with [[GT_LOCATOR evidence\nAnswer body",
+        ),
+    ],
+)
+def test_non_office_marker_text_remains_resolvable_exact_evidence(
+    source_type: SourceType,
+    name: str,
+    q: str,
+    a: str,
+    expected: str,
+) -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk("chunk-1", "collection-1", "provider", q, a, 0.9),
+        source=_source(1, name, source_type=source_type),
+        retrieval_position=2,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.status == "ok"
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 2")
+    assert result.citations[0].excerpt == expected
+
+
+def test_out_of_bounds_xlsx_marker_falls_back_to_chunk_location() -> None:
+    marker = (
+        '[[GT_LOCATOR {"cell_range":"XFE1:XFE2","kind":"xlsx",'
+        '"sheet":"Week 1"}]]'
+    )
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1", "collection-1", "provider", f"{marker}\nEvidence", "", 0.9
+        ),
+        source=_source(1, "scores.xlsx", source_type=SourceType.FILE),
+        retrieval_position=3,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ChunkLocator(label="匹配片段 3")
+    assert result.citations[0].excerpt == "Evidence"
+
+
+def test_image_sources_use_filename_without_guessing_a_region() -> None:
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1", "collection-1", "provider", "Diagram evidence", "", 0.9
+        ),
+        source=_source(1, "diagram.png", source_type=SourceType.FILE),
+        retrieval_position=1,
+    )
+
+    result = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert result.citations[0].locator == ImageLocator(filename="diagram.png")
+    assert result.citations[0].locator.region is None

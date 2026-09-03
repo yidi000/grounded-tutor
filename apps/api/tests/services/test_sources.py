@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
+from threading import Event, get_ident
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -14,9 +16,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from grounded_tutor.adapters.fakes import FakeCollection, FakeFastGPT
-from grounded_tutor.adapters.fastgpt import DatasetRef, ExternalServiceError, ProcessedChunk
+from grounded_tutor.adapters.fastgpt import (
+    DatasetRef,
+    ExternalServiceError,
+    ProcessedChunk,
+    RetrievedChunk,
+)
 from grounded_tutor.config import Settings
 from grounded_tutor.db import create_database_engine
+from grounded_tutor.domain.answers import GeneratedAnswer, GeneratedBlock, PptxLocator
 from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.domain.models import Base, Source, SourceStatus, SourceType, Workspace
 from grounded_tutor.repositories.sources import (
@@ -24,10 +32,20 @@ from grounded_tutor.repositories.sources import (
     SourcePersistenceOutcome,
     SourceRepository,
 )
+from grounded_tutor.services.grounding import (
+    MAX_LOCATOR_MARKER_CHARS,
+    ReadyChunk,
+    ground_generated_answer,
+)
+from grounded_tutor.services.previews import PreviewError, preview_file
 from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError, WorkspaceLockRegistry
 from grounded_tutor.services.sources import (
     ExternalSourceServiceError,
+    NormalizedMaterial,
+    SourceLifecycleConflictError,
+    SourceNotFoundError,
     SourceService,
+    SourceWorkspaceNotFoundError,
     source_marker,
 )
 
@@ -783,6 +801,450 @@ async def test_file_ingestion_forwards_original_bytes_and_canonical_config(sourc
     assert "collectionId" not in config
     assert result.source.ingestion_config == settings.model_dump(by_alias=True)
     assert result.source.name == "course.pdf"
+
+
+@pytest.mark.asyncio
+async def test_pptx_ingestion_normalizes_locator_records_as_text(source_context) -> None:
+    _, fake, workspace, service = source_context
+    content = (Path(__file__).parents[1] / "fixtures" / "slides.pptx").read_bytes()
+
+    result = await service.ingest_file(
+        workspace_id=workspace.id,
+        filename="course.pptx",
+        content=content,
+        settings=ChunkSettings(),
+    )
+
+    assert fake.create_file_collection_calls == []
+    dataset_id, remote_name, normalized, _ = fake.create_text_collection_calls[0]
+    marker = source_marker(result.source.id)
+    assert dataset_id == "dataset-statistics"
+    assert remote_name == f"{marker}--course.pptx"
+    assert normalized == (
+        '[[GT_LOCATOR {"kind":"pptx","slide":1,"title":"Chunking"}]]\n'
+        "Chunking\nSplit source material into bounded records.\n\n"
+        '[[GT_LOCATOR {"kind":"pptx","slide":2,"title":"Grounding"}]]\n'
+        "Grounding\nCitations connect answers to evidence."
+    )
+    assert result.source.name == "course.pptx"
+    assert result.source.source_type is SourceType.FILE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content_kind", "expected_text"),
+    [
+        ("table", "Mean\nAverage"),
+        ("nested_group", "Grouped evidence"),
+    ],
+)
+async def test_pptx_ingestion_normalizes_table_and_nested_group_records(
+    source_context,
+    content_kind: str,
+    expected_text: str,
+) -> None:
+    _, fake, workspace, service = source_context
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    if content_kind == "table":
+        table = slide.shapes.add_table(
+            1, 2, Inches(1), Inches(1), Inches(6), Inches(1)
+        ).table
+        table.cell(0, 0).text = "Mean"
+        table.cell(0, 1).text = "Average"
+    else:
+        outer = slide.shapes.add_group_shape()
+        inner = outer.shapes.add_group_shape()
+        inner.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(4), Inches(1)
+        ).text = "Grouped evidence"
+    output = BytesIO()
+    presentation.save(output)
+
+    await service.ingest_file(
+        workspace_id=workspace.id,
+        filename="nested.pptx",
+        content=output.getvalue(),
+        settings=ChunkSettings(),
+    )
+
+    assert fake.create_text_collection_calls[-1][2] == (
+        '[[GT_LOCATOR {"kind":"pptx","slide":1}]]\n' + expected_text
+    )
+
+
+@pytest.mark.asyncio
+async def test_xlsx_file_reprocess_uses_normalized_text(source_context) -> None:
+    _, fake, workspace, service = source_context
+    original = await service.ingest_text(
+        workspace_id=workspace.id,
+        name="scores",
+        text="Original scores",
+        settings=ChunkSettings(),
+    )
+    await service.accept(workspace.id, original.source.id)
+    content = (Path(__file__).parents[1] / "fixtures" / "workbook.xlsx").read_bytes()
+
+    result = await service.reprocess_file(
+        workspace_id=workspace.id,
+        source_id=original.source.id,
+        filename="scores.xlsx",
+        content=content,
+        settings=ChunkSettings(),
+    )
+
+    assert fake.create_text_collection_calls[-1][2] == (
+        '[[GT_LOCATOR {"cell_range":"A1:B3","kind":"xlsx","sheet":"Week 1"}]]\n'
+        "Topic | Score\nMean | 90\nMedian | 85"
+    )
+    assert result.source.source_type is SourceType.FILE
+    assert result.source.replaces_source_id == original.source.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case", "expected_error"),
+    [
+        ("missing_workspace", SourceWorkspaceNotFoundError),
+        ("missing_source", SourceNotFoundError),
+        ("invalid_transition", SourceLifecycleConflictError),
+        ("pending_review", SourceLifecycleConflictError),
+        ("busy", WorkspaceIngestionBusyError),
+    ],
+)
+async def test_file_normalization_runs_only_after_lifecycle_guards(
+    source_context,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    expected_error: type[Exception],
+) -> None:
+    session_factory, _, workspace, service = source_context
+    normalize_calls: list[str] = []
+
+    def normalize(*_args, **_kwargs) -> NormalizedMaterial:
+        normalize_calls.append("called")
+        return NormalizedMaterial(remote_kind="file", content=b"normalized")
+
+    monkeypatch.setattr("grounded_tutor.services.sources._safe_normalize_material", normalize)
+    workspace_id = workspace.id
+    source_id = UUID(int=0)
+    if case in {"invalid_transition", "pending_review"}:
+        source_id = uuid4()
+        with session_factory() as session:
+            original = Source(
+                id=source_id,
+                workspace_id=workspace.id,
+                name="slides.pptx",
+                source_type=SourceType.FILE,
+                collection_id="collection-original",
+                status=(
+                    SourceStatus.INDEXING
+                    if case == "invalid_transition"
+                    else SourceStatus.READY
+                ),
+                lineage_id=source_id,
+                ingestion_config={},
+            )
+            session.add(original)
+            if case == "pending_review":
+                session.add(
+                    Source(
+                        workspace_id=workspace.id,
+                        name="slides v2.pptx",
+                        source_type=SourceType.FILE,
+                        collection_id="collection-review",
+                        status=SourceStatus.REVIEW,
+                        lineage_id=source_id,
+                        replaces_source_id=source_id,
+                        version=2,
+                        ingestion_config={},
+                    )
+                )
+            session.commit()
+    elif case == "missing_workspace":
+        workspace_id = UUID(int=0)
+
+    async def run() -> None:
+        if case in {"missing_workspace", "busy"}:
+            await service.ingest_file(
+                workspace_id=workspace_id,
+                filename="slides.pptx",
+                content=b"parser input",
+                settings=ChunkSettings(),
+            )
+        else:
+            await service.reprocess_file(
+                workspace_id=workspace_id,
+                source_id=source_id,
+                filename="slides.pptx",
+                content=b"parser input",
+                settings=ChunkSettings(),
+            )
+
+    with pytest.raises(expected_error):
+        if case == "busy":
+            async with service._locks.acquire(workspace.id):
+                await run()
+        else:
+            await run()
+
+    assert normalize_calls == []
+
+
+@pytest.mark.asyncio
+async def test_file_normalization_runs_off_the_event_loop_thread(
+    source_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, workspace, service = source_context
+    event_loop_thread = get_ident()
+    normalization_threads: list[int] = []
+
+    def normalize(*_args, **_kwargs) -> NormalizedMaterial:
+        normalization_threads.append(get_ident())
+        return NormalizedMaterial(remote_kind="file", content=b"normalized")
+
+    monkeypatch.setattr("grounded_tutor.services.sources._safe_normalize_material", normalize)
+
+    await service.ingest_file(
+        workspace_id=workspace.id,
+        filename="slides.pptx",
+        content=b"parser input",
+        settings=ChunkSettings(),
+    )
+
+    assert normalization_threads
+    assert normalization_threads[0] != event_loop_thread
+
+
+@pytest.mark.asyncio
+async def test_cancelled_file_normalization_holds_workspace_lock_until_worker_finishes(
+    source_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_factory, fake, workspace, service = source_context
+    started = Event()
+    release = Event()
+    second_started = Event()
+    normalization_calls = 0
+
+    def normalize(*_args, **_kwargs) -> NormalizedMaterial:
+        nonlocal normalization_calls
+        normalization_calls += 1
+        if normalization_calls == 1:
+            started.set()
+            assert release.wait(timeout=5)
+        else:
+            second_started.set()
+        return NormalizedMaterial(remote_kind="file", content=b"normalized")
+
+    monkeypatch.setattr("grounded_tutor.services.sources._safe_normalize_material", normalize)
+    first = asyncio.create_task(
+        service.ingest_file(
+            workspace_id=workspace.id,
+            filename="first.pptx",
+            content=b"parser input",
+            settings=ChunkSettings(),
+        )
+    )
+    cancelled = False
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
+        first.cancel()
+        await asyncio.sleep(0)
+        first.cancel()
+        await asyncio.sleep(0)
+
+        assert service._locks.active_count == 1
+        with pytest.raises(WorkspaceIngestionBusyError):
+            await service.ingest_file(
+                workspace_id=workspace.id,
+                filename="second.pptx",
+                content=b"parser input",
+                settings=ChunkSettings(),
+            )
+        assert not second_started.is_set()
+    finally:
+        release.set()
+        try:
+            await first
+        except asyncio.CancelledError:
+            cancelled = True
+
+    assert cancelled
+    assert service._locks.active_count == 0
+    assert fake.call_history == []
+    with session_factory() as session:
+        assert session.scalar(select(Source)) is None
+
+
+@pytest.mark.asyncio
+async def test_image_ingestion_is_gated_and_forwards_verified_original_bytes(
+    source_context,
+) -> None:
+    session_factory, fake, workspace, disabled_service = source_context
+    content = (Path(__file__).parents[1] / "fixtures" / "diagram.png").read_bytes()
+
+    with pytest.raises(PreviewError) as caught:
+        await disabled_service.ingest_file(
+            workspace_id=workspace.id,
+            filename="diagram.png",
+            content=content,
+            settings=ChunkSettings(),
+        )
+
+    assert caught.value.code == "unsupported_file_type"
+    session = session_factory()
+    try:
+        enabled_service = SourceService(
+            SourceRepository(session),
+            fake,
+            WorkspaceLockRegistry(),
+            supports_image_files=True,
+        )
+        result = await enabled_service.ingest_file(
+            workspace_id=workspace.id,
+            filename="diagram.png",
+            content=content,
+            settings=ChunkSettings(),
+        )
+    finally:
+        session.close()
+
+    assert fake.create_file_collection_calls[-1][2] == content
+    assert result.source.name == "diagram.png"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "marker_like_text",
+    [
+        '[[GT_LOCATOR {"kind":"pptx","slide":999}]]',
+        'x[[GT_LOCATOR{"kind":"pptx","slide":5}]]',
+        '[[GT_LOCATOR\t{"kind":"pptx","slide":6}]]',
+    ],
+)
+async def test_normalization_escapes_marker_like_office_content(
+    source_context, marker_like_text: str
+) -> None:
+    _, fake, workspace, service = source_context
+    from pptx import Presentation
+
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = "Safety"
+    slide.placeholders[1].text = f"{marker_like_text}\nUntrusted content"
+    output = BytesIO()
+    presentation.save(output)
+
+    await service.ingest_file(
+        workspace_id=workspace.id,
+        filename="safety.pptx",
+        content=output.getvalue(),
+        settings=ChunkSettings(),
+    )
+
+    normalized = fake.create_text_collection_calls[0][2]
+    assert normalized.count("[[GT_LOCATOR") == 1
+    assert "[[GT_USER_TEXT" in normalized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pptx_title", "expected_title"),
+    [
+        ('\\"' * 300, ('\\"' * 300)[:120]),
+        ("A" * 119 + " " + "B", "A" * 119),
+        (
+            "Before ]] and [[GT_LOCATOR after",
+            "Before ]] and [[GT_LOCATOR after",
+        ),
+        ("[" * 120, "[" * 120),
+    ],
+)
+async def test_bounded_pptx_title_keeps_preview_and_grounding_locator_coherent(
+    source_context, pptx_title: str, expected_title: str
+) -> None:
+    _, fake, workspace, service = source_context
+    from pptx import Presentation
+
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[1])
+    slide.shapes.title.text = pptx_title
+    slide.placeholders[1].text = "Evidence body"
+    output = BytesIO()
+    presentation.save(output)
+    content = output.getvalue()
+
+    preview = preview_file(
+        "long-title.pptx",
+        content,
+        ChunkSettings(),
+        max_upload_bytes=20_000_000,
+    )
+    expected_locator = PptxLocator(slide=1, title=expected_title)
+    assert preview.items[0].locator == expected_locator
+
+    ingested = await service.ingest_file(
+        workspace_id=workspace.id,
+        filename="long-title.pptx",
+        content=content,
+        settings=ChunkSettings(),
+    )
+    normalized = fake.create_text_collection_calls[-1][2]
+    assert len(normalized.splitlines()[0]) <= MAX_LOCATOR_MARKER_CHARS
+    ready_source = await service.accept(workspace.id, ingested.source.id)
+    ready = ReadyChunk(
+        chunk=RetrievedChunk(
+            "chunk-1", "collection-1", "provider", normalized, "", 0.9
+        ),
+        source=ready_source,
+        retrieval_position=1,
+    )
+
+    grounded = ground_generated_answer(
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="block-1", kind="answer", text="Answer", chunk_ids=("chunk-1",)
+                ),
+            )
+        ),
+        {"chunk-1": ready},
+        allowed_kinds={"answer"},
+    )
+
+    assert grounded.citations[0].locator == expected_locator
+    assert "Evidence body" in grounded.citations[0].excerpt
+
+
+@pytest.mark.asyncio
+async def test_office_parser_failures_cross_the_safe_ingestion_boundary(
+    source_context,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_factory, fake, workspace, service = source_context
+    monkeypatch.setattr(
+        "grounded_tutor.services.previews.Presentation",
+        lambda stream: (_ for _ in ()).throw(RuntimeError("private parser detail")),
+    )
+
+    with pytest.raises(PreviewError) as caught:
+        await service.ingest_file(
+            workspace_id=workspace.id,
+            filename="slides.pptx",
+            content=(Path(__file__).parents[1] / "fixtures" / "slides.pptx").read_bytes(),
+            settings=ChunkSettings(),
+        )
+
+    assert caught.value.code == "unreadable_file"
+    assert "private parser detail" not in str(caught.value)
+    assert fake.call_history == []
+    with session_factory() as session:
+        assert session.scalar(select(Source)) is None
 
 
 @pytest.mark.asyncio

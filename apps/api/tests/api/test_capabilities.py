@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import func, select
 
-from grounded_tutor.config import get_settings
+from grounded_tutor.config import Settings, get_settings
 from grounded_tutor.domain.models import Source
 from grounded_tutor.domain.schemas import ApiErrorDetail
 
@@ -42,7 +42,16 @@ def test_capabilities_report_only_verified_formats(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {
-        "accepted_extensions": [".csv", ".docx", ".html", ".md", ".pdf", ".txt"],
+        "accepted_extensions": [
+            ".csv",
+            ".docx",
+            ".html",
+            ".md",
+            ".pdf",
+            ".pptx",
+            ".txt",
+            ".xlsx",
+        ],
         "max_upload_bytes": 20_000_000,
         "settings": [
             {
@@ -74,6 +83,54 @@ def test_capabilities_report_only_verified_formats(client: TestClient) -> None:
             },
         ],
         "read_only_demo": False,
+    }
+
+
+def test_image_capability_and_extensions_require_explicit_confirmation(
+    client: TestClient,
+) -> None:
+    disabled = client.get("/api/capabilities/source-ingestion").json()
+    assert not {".png", ".jpg", ".jpeg", ".webp"} & set(
+        disabled["accepted_extensions"]
+    )
+    assert next(
+        item for item in disabled["settings"] if item["key"] == "imageFiles"
+    ) == {
+        "key": "imageFiles",
+        "supported": False,
+        "disabled_reason": "deployment_not_verified",
+    }
+
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        supports_image_files=True
+    )
+    enabled = client.get("/api/capabilities/source-ingestion").json()
+
+    assert {".png", ".jpg", ".jpeg", ".webp"} <= set(
+        enabled["accepted_extensions"]
+    )
+    assert next(
+        item for item in enabled["settings"] if item["key"] == "imageFiles"
+    ) == {"key": "imageFiles", "supported": True, "disabled_reason": None}
+
+
+def test_read_only_demo_still_disables_confirmed_image_ingestion(
+    client: TestClient,
+) -> None:
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        demo_read_only=True,
+        supports_image_files=True,
+    )
+
+    response = client.get("/api/capabilities/source-ingestion")
+
+    assert response.status_code == 200
+    assert next(
+        item for item in response.json()["settings"] if item["key"] == "imageFiles"
+    ) == {
+        "key": "imageFiles",
+        "supported": False,
+        "disabled_reason": "demo_read_only",
     }
 
 

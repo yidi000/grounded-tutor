@@ -7,7 +7,7 @@ from grounded_tutor.domain.schemas import (
     CapabilityItem,
     SourceIngestionCapabilities,
 )
-from grounded_tutor.services.previews import SUPPORTED_EXTENSIONS
+from grounded_tutor.services.previews import IMAGE_EXTENSIONS, SUPPORTED_EXTENSIONS
 
 router = APIRouter(prefix="/api/capabilities", tags=["capabilities"])
 
@@ -30,7 +30,10 @@ def source_ingestion_capabilities(
 ) -> SourceIngestionCapabilities:
     demo = settings.demo_read_only
     return SourceIngestionCapabilities(
-        accepted_extensions=sorted(SUPPORTED_EXTENSIONS),
+        accepted_extensions=sorted(
+            SUPPORTED_EXTENSIONS
+            | (IMAGE_EXTENSIONS if settings.supports_image_files else frozenset())
+        ),
         max_upload_bytes=settings.max_upload_bytes,
         settings=[
             _capability_item(

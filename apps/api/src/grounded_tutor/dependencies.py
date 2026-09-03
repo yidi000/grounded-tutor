@@ -48,6 +48,7 @@ def get_preview_service(
         max_upload_bytes=settings.max_upload_bytes,
         max_preview_text_bytes=settings.max_preview_text_bytes,
         max_extracted_characters=settings.max_extracted_characters,
+        supports_image_files=settings.supports_image_files,
     )
 
 
@@ -63,6 +64,8 @@ def get_source_service(
         locks,
         max_upload_bytes=settings.max_upload_bytes,
         max_text_bytes=settings.max_preview_text_bytes,
+        max_extracted_characters=settings.max_extracted_characters,
+        supports_image_files=settings.supports_image_files,
     )
 
 

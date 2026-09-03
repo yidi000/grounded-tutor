@@ -3,12 +3,17 @@ from pathlib import Path
 
 import pytest
 from docx import Document
+from pptx import Presentation
+from pptx.util import Inches
 from pydantic import ValidationError
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
+from grounded_tutor.domain.answers import ImageLocator, PptxLocator, XlsxLocator
 from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.services.previews import PreviewError, preview_file, preview_text
+
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def _empty_docx() -> bytes:
@@ -262,11 +267,16 @@ def test_qa_preview_returns_source_excerpts_and_never_local_question_answer_pair
     assert [warning.code for warning in preview.warnings] == [
         "qa_generated_after_processing"
     ]
-    assert all(set(item.model_dump()) == {"position", "text", "character_count", "truncated"} for item in preview.items)
+    assert all(
+        set(item.model_dump())
+        == {"position", "text", "character_count", "truncated", "locator"}
+        and item.locator is None
+        for item in preview.items
+    )
 
 
 def test_txt_fixture_is_extracted_before_preview() -> None:
-    content = (Path(__file__).parents[1] / "fixtures" / "statistics.txt").read_bytes()
+    content = (FIXTURES / "statistics.txt").read_bytes()
 
     preview = preview_file("statistics.TXT", content, ChunkSettings(), max_upload_bytes=10_000)
 
@@ -275,6 +285,113 @@ def test_txt_fixture_is_extracted_before_preview() -> None:
         "Mean is an average.",
         "Median is the middle value.",
     ]
+    assert all(item.locator is None for item in preview.items)
+
+
+def test_pptx_preview_preserves_one_record_per_nonempty_slide() -> None:
+    preview = preview_file(
+        "slides.pptx",
+        (FIXTURES / "slides.pptx").read_bytes(),
+        ChunkSettings(),
+        max_upload_bytes=100_000,
+    )
+
+    assert [item.locator for item in preview.items] == [
+        PptxLocator(slide=1, title="Chunking"),
+        PptxLocator(slide=2, title="Grounding"),
+    ]
+    assert preview.items[0].text == "Chunking\nSplit source material into bounded records."
+    assert preview.items[1].text == "Grounding\nCitations connect answers to evidence."
+
+
+@pytest.mark.parametrize(
+    ("content_kind", "expected_text"),
+    [
+        ("table", "Mean\nAverage"),
+        ("nested_group", "Grouped evidence"),
+    ],
+)
+def test_pptx_preview_extracts_table_and_nested_group_text(
+    content_kind: str,
+    expected_text: str,
+) -> None:
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    if content_kind == "table":
+        table = slide.shapes.add_table(
+            1, 2, Inches(1), Inches(1), Inches(6), Inches(1)
+        ).table
+        table.cell(0, 0).text = "Mean"
+        table.cell(0, 1).text = "Average"
+    else:
+        outer = slide.shapes.add_group_shape()
+        inner = outer.shapes.add_group_shape()
+        inner.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(4), Inches(1)
+        ).text = "Grouped evidence"
+    output = BytesIO()
+    presentation.save(output)
+
+    preview = preview_file(
+        "nested.pptx",
+        output.getvalue(),
+        ChunkSettings(),
+        max_upload_bytes=100_000,
+    )
+
+    assert len(preview.items) == 1
+    assert preview.items[0].locator == PptxLocator(slide=1)
+    assert preview.items[0].text == expected_text
+
+
+def test_office_qa_preview_keeps_actual_processing_warning() -> None:
+    preview = preview_file(
+        "slides.pptx",
+        (FIXTURES / "slides.pptx").read_bytes(),
+        ChunkSettings(training_type="qa"),
+        max_upload_bytes=100_000,
+    )
+
+    assert [warning.code for warning in preview.warnings] == [
+        "qa_generated_after_processing"
+    ]
+
+
+def test_xlsx_preview_preserves_sheet_and_used_cell_range() -> None:
+    preview = preview_file(
+        "scores.xlsx",
+        (FIXTURES / "workbook.xlsx").read_bytes(),
+        ChunkSettings(),
+        max_upload_bytes=100_000,
+    )
+
+    assert len(preview.items) == 1
+    assert preview.items[0].locator == XlsxLocator(
+        sheet="Week 1", cell_range="A1:B3"
+    )
+    assert preview.items[0].text == "Topic | Score\nMean | 90\nMedian | 85"
+
+
+def test_image_preview_requires_explicit_support_and_reports_metadata_only() -> None:
+    content = (FIXTURES / "diagram.png").read_bytes()
+
+    with pytest.raises(PreviewError) as caught:
+        preview_file(
+            "diagram.png", content, ChunkSettings(), max_upload_bytes=100_000
+        )
+
+    assert caught.value.code == "unsupported_file_type"
+
+    preview = preview_file(
+        "diagram.png",
+        content,
+        ChunkSettings(),
+        max_upload_bytes=100_000,
+        supports_image_files=True,
+    )
+    assert len(preview.items) == 1
+    assert preview.items[0].locator == ImageLocator(filename="diagram.png")
+    assert preview.items[0].text == "PNG image, 64 x 32 pixels"
 
 
 def test_markdown_is_extracted_as_text() -> None:

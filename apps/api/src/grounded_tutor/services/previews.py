@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import re
 import struct
-from collections.abc import Iterator, Mapping
+import warnings
+from collections.abc import Collection, Iterator, Mapping
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import ClassVar
@@ -14,8 +16,15 @@ from bs4 import BeautifulSoup
 from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
+from PIL import Image, UnidentifiedImageError
+from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.shapes.base import BaseShape
 from pypdf import PdfReader
 
+from grounded_tutor.domain.answers import ImageLocator, PptxLocator, SourceLocator, XlsxLocator
 from grounded_tutor.domain.errors import PublicErrorCode
 from grounded_tutor.domain.ingestion import (
     ChunkSettings,
@@ -30,13 +39,24 @@ MAX_PREVIEW_EXCERPT_CHARS = 500
 # Deterministic P0 guardrails. They bound parser inputs and output work; they do
 # not claim to sandbox third-party parsers or provide a wall-clock timeout.
 DEFAULT_MAX_EXTRACTED_CHARACTERS = 40_000_000
-MAX_DOCX_ARCHIVE_MEMBERS = 1_000
-MAX_DOCX_CENTRAL_DIRECTORY_BYTES = 2_000_000
-MAX_DOCX_UNCOMPRESSED_BYTES = 80_000_000
-MAX_DOCX_COMPRESSION_RATIO = 100.0
+MAX_ZIP_ARCHIVE_MEMBERS = 1_000
+MAX_ZIP_CENTRAL_DIRECTORY_BYTES = 2_000_000
+MAX_ZIP_UNCOMPRESSED_BYTES = 80_000_000
+MAX_ZIP_COMPRESSION_RATIO = 100.0
 MAX_DOCX_BLOCKS = 10_000
 MAX_PDF_PAGES = 500
-SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".md", ".txt", ".html", ".csv"})
+MAX_PPTX_SLIDES = 500
+MAX_PPTX_SHAPES = 10_000
+MAX_PPTX_LOCATOR_TITLE_CHARS = 120
+MAX_XLSX_SHEETS = 100
+MAX_XLSX_ROWS = 100_000
+MAX_XLSX_CELLS = 1_000_000
+MAX_IMAGE_DIMENSION = 16_384
+MAX_IMAGE_PIXELS = 40_000_000
+IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+SUPPORTED_EXTENSIONS = frozenset(
+    {".pdf", ".docx", ".md", ".txt", ".html", ".csv", ".pptx", ".xlsx"}
+)
 
 ZIP_EOCD_SIGNATURE = b"PK\x05\x06"
 ZIP64_EOCD_SIGNATURE = b"PK\x06\x06"
@@ -83,6 +103,7 @@ class PreviewService:
         max_upload_bytes: int,
         max_preview_text_bytes: int,
         max_extracted_characters: int,
+        supports_image_files: bool = False,
     ) -> None:
         _require_positive_limit(max_upload_bytes)
         _require_positive_limit(max_preview_text_bytes)
@@ -91,6 +112,7 @@ class PreviewService:
         self.max_upload_bytes = max_upload_bytes
         self.max_preview_text_bytes = max_preview_text_bytes
         self.max_extracted_characters = max_extracted_characters
+        self.supports_image_files = supports_image_files
 
     def from_text(
         self,
@@ -130,6 +152,7 @@ class PreviewService:
             settings,
             max_upload_bytes=self.max_upload_bytes,
             max_extracted_characters=self.max_extracted_characters,
+            supports_image_files=self.supports_image_files,
         )
 
     def _require_workspace(self, workspace_id: UUID) -> None:
@@ -189,16 +212,35 @@ def preview_file(
     *,
     max_upload_bytes: int,
     max_extracted_characters: int = DEFAULT_MAX_EXTRACTED_CHARACTERS,
+    supports_image_files: bool = False,
 ) -> PreviewResponse:
     _require_positive_limit(max_extracted_characters)
     _validate_file_size(content, max_upload_bytes)
-    source_name = filename.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
-    if not 1 <= len(source_name) <= 255:
-        raise PreviewError("validation_error")
+    source_name = safe_source_name(filename)
     suffix = Path(source_name).suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS or not Path(source_name).stem:
+    supported_extensions = SUPPORTED_EXTENSIONS | (
+        IMAGE_EXTENSIONS if supports_image_files else frozenset()
+    )
+    if suffix not in supported_extensions or not Path(source_name).stem:
         raise PreviewError("unsupported_file_type")
     try:
+        if suffix in IMAGE_EXTENSIONS:
+            text = image_metadata(suffix, content)
+            return _preview_records(
+                source_name,
+                [(text, ImageLocator(filename=source_name))],
+                settings,
+            )
+        if suffix in {".pptx", ".xlsx"}:
+            return _preview_records(
+                source_name,
+                extract_office_records(
+                    suffix,
+                    content,
+                    max_extracted_characters=max_extracted_characters,
+                ),
+                settings,
+            )
         text = _extract_text(
             suffix,
             content,
@@ -250,7 +292,7 @@ def _extract_text(
                 extracted_rows.append(extracted)
         return "\n".join(extracted_rows)
     if suffix == ".docx":
-        validated_content = _preflight_docx(content)
+        validated_content = preflight_zip_package(content)
         document = Document(BytesIO(validated_content))
         blocks: list[str] = []
         extracted_characters = 0
@@ -308,25 +350,279 @@ def _extract_text(
     return "\n\n".join(pages)
 
 
-def _preflight_docx(content: bytes) -> bytes:
+def safe_source_name(filename: str) -> str:
+    source_name = filename.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
+    if not 1 <= len(source_name) <= 255:
+        raise PreviewError("validation_error")
+    return source_name
+
+
+def extract_office_records(
+    suffix: str,
+    content: bytes,
+    *,
+    max_extracted_characters: int,
+) -> list[tuple[str, PptxLocator | XlsxLocator]]:
+    validated_content = preflight_zip_package(content)
+    if suffix == ".pptx":
+        return _extract_pptx_records(validated_content, max_extracted_characters)
+    if suffix == ".xlsx":
+        return _extract_xlsx_records(validated_content, max_extracted_characters)
+    raise PreviewError("unsupported_file_type")
+
+
+def _extract_pptx_records(
+    content: bytes, max_extracted_characters: int
+) -> list[tuple[str, PptxLocator | XlsxLocator]]:
+    presentation = Presentation(BytesIO(content))
+    if len(presentation.slides) > MAX_PPTX_SLIDES:
+        raise PreviewError("source_work_limit_exceeded")
+    records: list[tuple[str, PptxLocator | XlsxLocator]] = []
+    extracted_characters = 0
+    shape_count = 0
+    for slide_number, slide in enumerate(presentation.slides, start=1):
+        title_shape = slide.shapes.title
+        texts, title, shape_count = _pptx_shape_texts(
+            slide.shapes,
+            shape_count=shape_count,
+            title_shape_id=title_shape.shape_id if title_shape is not None else None,
+        )
+        parts = ([title] if title else []) + texts
+        record = "\n".join(parts)
+        if not record:
+            continue
+        extracted_characters = _next_extracted_size(
+            extracted_characters,
+            record,
+            has_previous=bool(records),
+            max_extracted_characters=max_extracted_characters,
+            separator_size=2,
+        )
+        locator_title = title[:MAX_PPTX_LOCATOR_TITLE_CHARS].rstrip() or None
+        records.append(
+            (
+                record,
+                PptxLocator(slide=slide_number, title=locator_title),
+            )
+        )
+    return records
+
+
+def _pptx_shape_texts(
+    shapes: Collection[BaseShape],
+    *,
+    shape_count: int,
+    title_shape_id: int | None = None,
+) -> tuple[list[str], str, int]:
+    shape_count += len(shapes)
+    if shape_count > MAX_PPTX_SHAPES:
+        raise PreviewError("source_work_limit_exceeded")
+    texts: list[str] = []
+    title = ""
+    ordered_shapes = sorted(
+        enumerate(shapes),
+        key=lambda item: (item[1].top, item[1].left, item[0]),
+    )
+    for _, shape in ordered_shapes:
+        if getattr(shape, "has_text_frame", False):
+            text = shape.text.strip()
+            if shape.shape_id == title_shape_id:
+                title = text
+            elif text:
+                texts.append(text)
+        if getattr(shape, "has_table", False):
+            rows = [row.cells for row in shape.table.rows]
+            shape_count += sum(len(cells) for cells in rows)
+            if shape_count > MAX_PPTX_SHAPES:
+                raise PreviewError("source_work_limit_exceeded")
+            for cells in rows:
+                for cell in cells:
+                    text = cell.text.strip()
+                    if text:
+                        texts.append(text)
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            nested_texts, _, shape_count = _pptx_shape_texts(
+                shape.shapes,
+                shape_count=shape_count,
+            )
+            texts.extend(nested_texts)
+    return texts, title, shape_count
+
+
+def _extract_xlsx_records(
+    content: bytes, max_extracted_characters: int
+) -> list[tuple[str, PptxLocator | XlsxLocator]]:
+    _reject_unsafe_workbook_features(content)
+    workbook = load_workbook(
+        BytesIO(content),
+        read_only=True,
+        data_only=True,
+        keep_links=False,
+    )
+    try:
+        if len(workbook.worksheets) > MAX_XLSX_SHEETS:
+            raise PreviewError("source_work_limit_exceeded")
+        records: list[tuple[str, PptxLocator | XlsxLocator]] = []
+        extracted_characters = 0
+        visited_rows = 0
+        visited_cells = 0
+        for sheet in workbook.worksheets:
+            if sheet.max_row > MAX_XLSX_ROWS or (
+                sheet.max_row * sheet.max_column > MAX_XLSX_CELLS
+            ):
+                raise PreviewError("source_work_limit_exceeded")
+            lines: list[str] = []
+            min_row = min_column = None
+            max_row = max_column = 0
+            for row in sheet.iter_rows():
+                visited_rows += 1
+                visited_cells += len(row)
+                if visited_rows > MAX_XLSX_ROWS or visited_cells > MAX_XLSX_CELLS:
+                    raise PreviewError("source_work_limit_exceeded")
+                values: list[str] = []
+                for cell in row:
+                    value = _xlsx_cell_text(cell.value)
+                    if value is None:
+                        continue
+                    values.append(value)
+                    min_row = cell.row if min_row is None else min(min_row, cell.row)
+                    min_column = (
+                        cell.column
+                        if min_column is None
+                        else min(min_column, cell.column)
+                    )
+                    max_row = max(max_row, cell.row)
+                    max_column = max(max_column, cell.column)
+                if values:
+                    lines.append(" | ".join(values))
+            if not lines or min_row is None or min_column is None:
+                continue
+            record = "\n".join(lines)
+            extracted_characters = _next_extracted_size(
+                extracted_characters,
+                record,
+                has_previous=bool(records),
+                max_extracted_characters=max_extracted_characters,
+                separator_size=2,
+            )
+            cell_range = (
+                f"{get_column_letter(min_column)}{min_row}:"
+                f"{get_column_letter(max_column)}{max_row}"
+            )
+            records.append(
+                (record, XlsxLocator(sheet=sheet.title, cell_range=cell_range))
+            )
+        return records
+    finally:
+        workbook.close()
+
+
+def _xlsx_cell_text(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (dt.datetime, dt.date, dt.time)):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def _reject_unsafe_workbook_features(content: bytes) -> None:
+    with ZipFile(BytesIO(content)) as archive:
+        names = [name.casefold() for name in archive.namelist()]
+        if any(
+            name.endswith("vbaproject.bin") or name.startswith("xl/externallinks/")
+            for name in names
+        ):
+            raise PreviewError("unreadable_file")
+        try:
+            content_types = archive.read("[Content_Types].xml").lower()
+        except KeyError:
+            raise PreviewError("unreadable_file") from None
+    if b"macroenabled" in content_types or b"externallink" in content_types:
+        raise PreviewError("unreadable_file")
+
+
+def image_metadata(suffix: str, content: bytes) -> str:
+    expected_format = {
+        ".png": "PNG",
+        ".jpg": "JPEG",
+        ".jpeg": "JPEG",
+        ".webp": "WEBP",
+    }[suffix]
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as image:
+                image.verify()
+            with Image.open(BytesIO(content)) as image:
+                actual_format = image.format
+                width, height = image.size
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise PreviewError("source_work_limit_exceeded") from None
+    except (UnidentifiedImageError, OSError, SyntaxError):
+        raise PreviewError("unreadable_file") from None
+    if actual_format != expected_format:
+        raise PreviewError("unreadable_file")
+    if (
+        width <= 0
+        or height <= 0
+        or width > MAX_IMAGE_DIMENSION
+        or height > MAX_IMAGE_DIMENSION
+        or width * height > MAX_IMAGE_PIXELS
+    ):
+        raise PreviewError("source_work_limit_exceeded")
+    return f"{actual_format} image, {width} x {height} pixels"
+
+
+def _preview_records(
+    source_name: str,
+    records: list[tuple[str, SourceLocator]],
+    settings: ChunkSettings,
+) -> PreviewResponse:
+    if not records:
+        raise PreviewError("empty_source")
+    visible_records = records[:MAX_PREVIEW_ITEMS]
+    preview_warnings = []
+    if settings.training_type == "qa":
+        preview_warnings.append(PreviewWarning(code="qa_generated_after_processing"))
+    if len(records) > MAX_PREVIEW_ITEMS:
+        preview_warnings.append(PreviewWarning(code="preview_truncated"))
+    return PreviewResponse(
+        source_name=source_name,
+        character_count=sum(len(text) for text, _ in records),
+        items=[
+            PreviewItem(
+                position=position,
+                text=text[:MAX_PREVIEW_EXCERPT_CHARS],
+                character_count=len(text),
+                truncated=len(text) > MAX_PREVIEW_EXCERPT_CHARS,
+                locator=locator,
+            )
+            for position, (text, locator) in enumerate(visible_records, start=1)
+        ],
+        warnings=preview_warnings,
+    )
+
+
+def preflight_zip_package(content: bytes) -> bytes:
     validated_content = _raw_zip_preflight(content)
     with ZipFile(BytesIO(validated_content)) as archive:
         members = archive.infolist()
-    if len(members) > MAX_DOCX_ARCHIVE_MEMBERS:
+    if len(members) > MAX_ZIP_ARCHIVE_MEMBERS:
         raise PreviewError("unsafe_archive")
     uncompressed_bytes = sum(member.file_size for member in members)
     compressed_bytes = sum(member.compress_size for member in members)
-    if uncompressed_bytes > MAX_DOCX_UNCOMPRESSED_BYTES:
+    if uncompressed_bytes > MAX_ZIP_UNCOMPRESSED_BYTES:
         raise PreviewError("unsafe_archive")
     if uncompressed_bytes and compressed_bytes == 0:
         raise PreviewError("unsafe_archive")
-    if compressed_bytes and uncompressed_bytes / compressed_bytes > MAX_DOCX_COMPRESSION_RATIO:
+    if compressed_bytes and uncompressed_bytes / compressed_bytes > MAX_ZIP_COMPRESSION_RATIO:
         raise PreviewError("unsafe_archive")
     if any(
         member.file_size
         and (
             member.compress_size == 0
-            or member.file_size / member.compress_size > MAX_DOCX_COMPRESSION_RATIO
+            or member.file_size / member.compress_size > MAX_ZIP_COMPRESSION_RATIO
         )
         for member in members
     ):
@@ -345,9 +641,9 @@ def _raw_zip_preflight(content: bytes) -> bytes:
         central_directory_offset,
         comment_length,
     ) = eocd
-    if entry_count == 0 or entry_count > MAX_DOCX_ARCHIVE_MEMBERS:
+    if entry_count == 0 or entry_count > MAX_ZIP_ARCHIVE_MEMBERS:
         raise PreviewError("unsafe_archive")
-    if central_directory_size > MAX_DOCX_CENTRAL_DIRECTORY_BYTES:
+    if central_directory_size > MAX_ZIP_CENTRAL_DIRECTORY_BYTES:
         raise PreviewError("unsafe_archive")
     central_directory_end = central_directory_offset + central_directory_size
     if (
@@ -451,7 +747,7 @@ def _validate_raw_central_directory(
     total_uncompressed_bytes = 0
     while position < end:
         if (
-            parsed_entries >= MAX_DOCX_ARCHIVE_MEMBERS
+            parsed_entries >= MAX_ZIP_ARCHIVE_MEMBERS
             or position + ZIP_CENTRAL_DIRECTORY_HEADER_SIZE > end
             or content[position : position + 4] != ZIP_CENTRAL_DIRECTORY_SIGNATURE
         ):
@@ -489,11 +785,11 @@ def _validate_raw_central_directory(
 
         total_compressed_bytes += compressed_size
         total_uncompressed_bytes += uncompressed_size
-        if total_uncompressed_bytes > MAX_DOCX_UNCOMPRESSED_BYTES:
+        if total_uncompressed_bytes > MAX_ZIP_UNCOMPRESSED_BYTES:
             raise PreviewError("unsafe_archive")
         if uncompressed_size and (
             compressed_size == 0
-            or uncompressed_size / compressed_size > MAX_DOCX_COMPRESSION_RATIO
+            or uncompressed_size / compressed_size > MAX_ZIP_COMPRESSION_RATIO
         ):
             raise PreviewError("unsafe_archive")
 
@@ -507,7 +803,7 @@ def _validate_raw_central_directory(
     if (
         total_compressed_bytes
         and total_uncompressed_bytes / total_compressed_bytes
-        > MAX_DOCX_COMPRESSION_RATIO
+        > MAX_ZIP_COMPRESSION_RATIO
     ):
         raise PreviewError("unsafe_archive")
 

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 from uuid import UUID, uuid4
 
 from grounded_tutor.adapters.fastgpt import CollectionListItem, FastGPTPort, ProcessedChunk
+from grounded_tutor.domain.answers import PptxLocator, XlsxLocator
 from grounded_tutor.domain.errors import PublicErrorCode
 from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.domain.models import SourceStatus, SourceType
@@ -23,7 +26,15 @@ from grounded_tutor.repositories.sources import (
     SourceRepository,
     SourceSummary,
 )
-from grounded_tutor.services.previews import SUPPORTED_EXTENSIONS, PreviewError
+from grounded_tutor.services.previews import (
+    DEFAULT_MAX_EXTRACTED_CHARACTERS,
+    IMAGE_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    PreviewError,
+    extract_office_records,
+    image_metadata,
+    safe_source_name,
+)
 from grounded_tutor.services.source_locks import WorkspaceLockRegistry
 
 SAFE_INGESTION_ERROR = "Source ingestion failed."
@@ -44,6 +55,9 @@ REMOTE_NAME_MAX_LENGTH = 255
 REMOTE_MARKER_PREFIX = "gt-src-"
 REMOTE_NAME_SEPARATOR = "--"
 MAX_PUBLIC_PROCESSED_FIELD_CHARS = 4_000
+LOCATOR_MARKER_TOKEN = "[[GT_LOCATOR"
+LOCATOR_MARKER_PREFIX = f"{LOCATOR_MARKER_TOKEN} "
+USER_LOCATOR_TEXT_TOKEN = "[[GT_USER_TEXT"
 
 
 class SourceWorkspaceNotFoundError(LookupError):
@@ -80,6 +94,36 @@ class ReconciliationResult:
     safe_error_message: str
 
 
+@dataclass(frozen=True, slots=True)
+class NormalizedMaterial:
+    remote_kind: Literal["file", "text"]
+    content: bytes | str
+
+
+async def _run_to_completion(operation: Awaitable[object]) -> object:
+    task = asyncio.create_task(operation)
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as error:
+            if task.cancelled():
+                break
+            cancelled = cancelled or error
+        except BaseException:
+            if not task.done():
+                raise
+    try:
+        result = task.result()
+    except BaseException as error:
+        if cancelled is not None:
+            raise cancelled from error
+        raise
+    if cancelled is not None:
+        raise cancelled
+    return result
+
+
 class SourceService:
     def __init__(
         self,
@@ -89,12 +133,16 @@ class SourceService:
         *,
         max_upload_bytes: int = 20_000_000,
         max_text_bytes: int = 20_000_000,
+        max_extracted_characters: int = DEFAULT_MAX_EXTRACTED_CHARACTERS,
+        supports_image_files: bool = False,
     ) -> None:
         self._repository = repository
         self._fastgpt = fastgpt
         self._locks = locks
         self.max_upload_bytes = max_upload_bytes
         self.max_text_bytes = max_text_bytes
+        self.max_extracted_characters = max_extracted_characters
+        self.supports_image_files = supports_image_files
 
     async def ingest_text(
         self,
@@ -125,16 +173,21 @@ class SourceService:
         content: bytes,
         settings: ChunkSettings,
     ) -> SourceIngestionResult:
-        safe_name = _validate_file(filename, content, self.max_upload_bytes)
+        safe_name = _validate_file(
+            filename,
+            content,
+            self.max_upload_bytes,
+            supports_image_files=self.supports_image_files,
+        )
         return await self._ingest(
             workspace_id=workspace_id,
             name=safe_name,
             source_type=SourceType.FILE,
             settings=settings,
-            create_collection=lambda dataset_id, remote_name, config: (
-                self._fastgpt.create_file_collection(
-                    dataset_id, remote_name, content, config
-                )
+            normalize_material=lambda: _safe_normalize_material(
+                safe_name,
+                content,
+                max_extracted_characters=self.max_extracted_characters,
             ),
         )
 
@@ -170,18 +223,44 @@ class SourceService:
         content: bytes,
         settings: ChunkSettings,
     ) -> SourceIngestionResult:
-        safe_name = _validate_file(filename, content, self.max_upload_bytes)
+        safe_name = _validate_file(
+            filename,
+            content,
+            self.max_upload_bytes,
+            supports_image_files=self.supports_image_files,
+        )
         return await self._ingest(
             workspace_id=workspace_id,
             name=safe_name,
             source_type=SourceType.FILE,
             settings=settings,
             replaces_source_id=source_id,
-            create_collection=lambda dataset_id, remote_name, config: (
-                self._fastgpt.create_file_collection(
-                    dataset_id, remote_name, content, config
-                )
+            normalize_material=lambda: _safe_normalize_material(
+                safe_name,
+                content,
+                max_extracted_characters=self.max_extracted_characters,
             ),
+        )
+
+    def _material_creator(
+        self, material: NormalizedMaterial
+    ) -> Callable[[str, str, dict[str, object]], Awaitable[object]]:
+        if material.remote_kind == "text":
+            if not isinstance(material.content, str):
+                raise TypeError("Text material requires text content.")
+            text = material.content
+            return lambda dataset_id, remote_name, config: (
+                self._fastgpt.create_text_collection(
+                    dataset_id, remote_name, text, config
+                )
+            )
+        if not isinstance(material.content, bytes):
+            raise TypeError("File material requires byte content.")
+        content = material.content
+        return lambda dataset_id, remote_name, config: (
+            self._fastgpt.create_file_collection(
+                dataset_id, remote_name, content, config
+            )
         )
 
     async def _ingest(
@@ -191,8 +270,11 @@ class SourceService:
         name: str,
         source_type: SourceType,
         settings: ChunkSettings,
-        create_collection: Callable[[str, str, dict[str, object]], Awaitable[object]],
         replaces_source_id: UUID | None = None,
+        create_collection: (
+            Callable[[str, str, dict[str, object]], Awaitable[object]] | None
+        ) = None,
+        normalize_material: Callable[[], NormalizedMaterial] | None = None,
     ) -> SourceIngestionResult:
         config = settings.model_dump(by_alias=True)
         source_id = uuid4()
@@ -219,6 +301,17 @@ class SourceService:
                     raise SourceLifecycleConflictError("invalid_source_transition")
                 lineage_id = replaced.summary.lineage_id
                 version = replaced.summary.version + 1
+            if normalize_material is not None:
+                material = await _run_to_completion(
+                    asyncio.to_thread(normalize_material)
+                )
+                if not isinstance(material, NormalizedMaterial):
+                    raise TypeError("Normalization returned invalid material.")
+                creator = self._material_creator(material)
+            elif create_collection is not None:
+                creator = create_collection
+            else:
+                raise TypeError("An ingestion creator is required.")
             collection_id: str | None = None
             remote_create_started = False
             try:
@@ -234,7 +327,7 @@ class SourceService:
                     version=version,
                 )
                 remote_create_started = True
-                collection = await create_collection(dataset_id, remote_name, remote_config)
+                collection = await creator(dataset_id, remote_name, remote_config)
                 collection_id = _collection_id(collection)
                 await self._set_collection_forbidden_confirmed(
                     dataset_id=dataset_id,
@@ -315,26 +408,7 @@ class SourceService:
     async def _run_reconciliation_to_completion(
         self, reconciliation: Awaitable[None]
     ) -> None:
-        task = asyncio.create_task(reconciliation)
-        cancelled: asyncio.CancelledError | None = None
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError as error:
-                if task.cancelled():
-                    break
-                cancelled = cancelled or error
-            except BaseException:
-                if not task.done():
-                    raise
-        try:
-            task.result()
-        except BaseException as error:
-            if cancelled is not None:
-                raise cancelled from error
-            raise
-        if cancelled is not None:
-            raise cancelled
+        await _run_to_completion(reconciliation)
 
     async def _reconcile_if_needed(
         self,
@@ -805,15 +879,81 @@ def _validate_text(name: str, text: str, max_text_bytes: int) -> None:
         raise PreviewError("empty_source")
 
 
-def _validate_file(filename: str, content: bytes, max_upload_bytes: int) -> str:
+def _validate_file(
+    filename: str,
+    content: bytes,
+    max_upload_bytes: int,
+    *,
+    supports_image_files: bool,
+) -> str:
     if len(content) > max_upload_bytes:
         raise PreviewError("file_too_large")
-    safe_name = filename.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
-    if not 1 <= len(safe_name) <= 255:
-        raise PreviewError("validation_error")
+    safe_name = safe_source_name(filename)
     path = Path(safe_name)
-    if path.suffix.lower() not in SUPPORTED_EXTENSIONS or not path.stem:
+    suffix = path.suffix.lower()
+    supported_extensions = SUPPORTED_EXTENSIONS | (
+        IMAGE_EXTENSIONS if supports_image_files else frozenset()
+    )
+    if suffix not in supported_extensions or not path.stem:
         raise PreviewError("unsupported_file_type")
     if not content:
         raise PreviewError("empty_source")
     return safe_name
+
+
+def _normalize_material(
+    safe_name: str,
+    content: bytes,
+    *,
+    max_extracted_characters: int,
+) -> NormalizedMaterial:
+    suffix = Path(safe_name).suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        image_metadata(suffix, content)
+        return NormalizedMaterial(remote_kind="file", content=content)
+    if suffix not in {".pptx", ".xlsx"}:
+        return NormalizedMaterial(remote_kind="file", content=content)
+    records = extract_office_records(
+        suffix,
+        content,
+        max_extracted_characters=max_extracted_characters,
+    )
+    if not records:
+        raise PreviewError("empty_source")
+    normalized = "\n\n".join(
+        (
+            f"{serialize_locator_marker(locator)}\n"
+            f"{text.replace(LOCATOR_MARKER_TOKEN, USER_LOCATOR_TEXT_TOKEN)}"
+        )
+        for text, locator in records
+    )
+    return NormalizedMaterial(remote_kind="text", content=normalized)
+
+
+def serialize_locator_marker(locator: PptxLocator | XlsxLocator) -> str:
+    encoded = json.dumps(
+        locator.model_dump(exclude_none=True),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    encoded = encoded.replace("[", r"\u005b").replace("]", r"\u005d")
+    return f"{LOCATOR_MARKER_PREFIX}{encoded}]]"
+
+
+def _safe_normalize_material(
+    safe_name: str,
+    content: bytes,
+    *,
+    max_extracted_characters: int,
+) -> NormalizedMaterial:
+    try:
+        return _normalize_material(
+            safe_name,
+            content,
+            max_extracted_characters=max_extracted_characters,
+        )
+    except PreviewError:
+        raise
+    except Exception:  # noqa: BLE001 -- parser details must not cross ingestion
+        raise PreviewError("unreadable_file") from None

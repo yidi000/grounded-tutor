@@ -4,12 +4,14 @@ import asyncio
 import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Event, Lock
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import event, select
 
 import grounded_tutor.main as main_module
@@ -17,6 +19,8 @@ from grounded_tutor.adapters.fakes import FakeFastGPT
 from grounded_tutor.adapters.fastgpt import DatasetRef, ExternalServiceError, ProcessedChunk
 from grounded_tutor.config import Settings, get_settings
 from grounded_tutor.domain.models import Source, SourceStatus, SourceType, Workspace
+
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 def _register_dataset(fake: FakeFastGPT, workspace: Workspace) -> None:
@@ -138,6 +142,82 @@ def test_file_source_rejects_one_byte_over_limit_and_unsupported_extension(
     assert unsupported.json() == {"detail": {"code": "unsupported_file_type"}}
     assert "private.exe" not in unsupported.text
     assert fake_fastgpt.create_file_collection_calls == []
+
+
+def test_office_ingestion_reports_unsafe_archives_as_resource_limits(
+    client: TestClient,
+    seeded_workspace: Workspace,
+    fake_fastgpt: FakeFastGPT,
+) -> None:
+    content = bytearray((FIXTURES / "slides.pptx").read_bytes())
+    eocd = content.rfind(b"PK\x05\x06")
+    content[eocd + 16 : eocd + 20] = (len(content) + 100).to_bytes(4, "little")
+
+    response = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/sources/file",
+        files={"file": ("slides.pptx", bytes(content))},
+        data={"settings": "{}"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": {"code": "unsafe_archive"}}
+    assert fake_fastgpt.call_history == []
+
+
+def test_enabled_image_ingestion_validates_then_forwards_original_bytes(
+    client: TestClient,
+    seeded_workspace: Workspace,
+    fake_fastgpt: FakeFastGPT,
+) -> None:
+    _register_dataset(fake_fastgpt, seeded_workspace)
+    content = (FIXTURES / "diagram.png").read_bytes()
+    disabled = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/sources/file",
+        files={"file": ("diagram.png", content, "image/png")},
+        data={"settings": "{}"},
+    )
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        supports_image_files=True
+    )
+    enabled = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/sources/file",
+        files={"file": ("diagram.png", content, "image/png")},
+        data={"settings": "{}"},
+    )
+
+    assert disabled.status_code == 415
+    assert enabled.status_code == 201
+    assert fake_fastgpt.create_file_collection_calls[-1][2] == content
+
+
+def test_oversized_enabled_image_ingestion_returns_resource_limit(
+    client: TestClient,
+    seeded_workspace: Workspace,
+    fake_fastgpt: FakeFastGPT,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
+    client.app.dependency_overrides[get_settings] = lambda: Settings(
+        supports_image_files=True
+    )
+
+    response = client.post(
+        f"/api/workspaces/{seeded_workspace.id}/sources/file",
+        files={
+            "file": (
+                "diagram.png",
+                (FIXTURES / "diagram.png").read_bytes(),
+                "image/png",
+            )
+        },
+        data={"settings": "{}"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {
+        "detail": {"code": "source_work_limit_exceeded"}
+    }
+    assert fake_fastgpt.call_history == []
 
 
 @pytest.mark.parametrize(

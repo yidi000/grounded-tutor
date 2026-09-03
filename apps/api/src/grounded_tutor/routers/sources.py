@@ -321,6 +321,9 @@ def _input_error(error: PreviewError) -> NoReturn:
     status_code = {
         "file_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
         "text_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+        "source_too_large": status.HTTP_413_CONTENT_TOO_LARGE,
+        "source_work_limit_exceeded": status.HTTP_413_CONTENT_TOO_LARGE,
+        "unsafe_archive": status.HTTP_413_CONTENT_TOO_LARGE,
         "unsupported_file_type": status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
     }.get(error.code, status.HTTP_422_UNPROCESSABLE_CONTENT)
     api_error(status_code, error.code)
