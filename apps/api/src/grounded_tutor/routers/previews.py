@@ -4,6 +4,7 @@ from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 
+from grounded_tutor.config import Settings, get_settings
 from grounded_tutor.dependencies import get_preview_service
 from grounded_tutor.domain.ingestion import (
     PreviewResponse,
@@ -11,7 +12,13 @@ from grounded_tutor.domain.ingestion import (
 )
 from grounded_tutor.domain.schemas import ApiErrorResponse
 from grounded_tutor.repositories.workspaces import WorkspacePersistenceError
-from grounded_tutor.routers.common import api_error, parse_chunk_settings, parse_uuid
+from grounded_tutor.routers.common import (
+    DEMO_WRITE_ERROR_RESPONSE,
+    api_error,
+    parse_chunk_settings,
+    parse_uuid,
+    require_chunk_capability,
+)
 from grounded_tutor.services.previews import (
     PreviewError,
     PreviewService,
@@ -24,6 +31,7 @@ router = APIRouter(
 )
 
 COMMON_ERROR_RESPONSES = {
+    **DEMO_WRITE_ERROR_RESPONSE,
     404: {"model": ApiErrorResponse, "description": "Workspace not found."},
     413: {"model": ApiErrorResponse, "description": "Preview resource limit exceeded."},
     422: {"model": ApiErrorResponse, "description": "Preview input is invalid."},
@@ -44,7 +52,9 @@ def create_text_preview(
     workspace_id: str,
     payload: TextPreviewRequest,
     service: Annotated[PreviewService, Depends(get_preview_service)],
+    runtime_settings: Annotated[Settings, Depends(get_settings)],
 ) -> PreviewResponse:
+    require_chunk_capability(payload.settings, runtime_settings)
     try:
         return service.from_text(
             parse_uuid(workspace_id, "workspace_not_found"),
@@ -69,9 +79,11 @@ def create_file_preview(
     workspace_id: str,
     service: Annotated[PreviewService, Depends(get_preview_service)],
     file: Annotated[UploadFile, File()],
+    runtime_settings: Annotated[Settings, Depends(get_settings)],
     settings: Annotated[str, Form()] = "{}",
 ) -> PreviewResponse:
     chunk_settings = parse_chunk_settings(settings)
+    require_chunk_capability(chunk_settings, runtime_settings)
     content = file.file.read(service.max_upload_bytes + 1)
     try:
         return service.from_file(

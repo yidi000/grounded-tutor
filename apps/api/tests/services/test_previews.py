@@ -387,7 +387,7 @@ def test_file_source_name_is_bounded_for_the_public_response() -> None:
             max_upload_bytes=10_000,
         )
 
-    assert caught.value.code == "invalid_source_name"
+    assert caught.value.code == "validation_error"
 
 
 def test_size_limit_is_enforced_before_attempting_to_parse() -> None:
@@ -460,7 +460,7 @@ def test_encrypted_pdf_is_rejected_without_attempting_to_extract() -> None:
             "encrypted.pdf", output.getvalue(), ChunkSettings(), max_upload_bytes=100_000
         )
 
-    assert caught.value.code == "encrypted_pdf"
+    assert caught.value.code == "unreadable_file"
     assert "not-public" not in f"{caught.value!r} {caught.value}"
 
 

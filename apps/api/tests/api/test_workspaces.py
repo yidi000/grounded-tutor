@@ -35,6 +35,7 @@ def test_create_workspace_creates_fastgpt_dataset(client: TestClient, fake_fastg
         "title",
         "source_count",
         "ready_source_count",
+        "model_choices",
         "created_at",
         "updated_at",
     }
@@ -43,24 +44,45 @@ def test_create_workspace_creates_fastgpt_dataset(client: TestClient, fake_fastg
     assert fake_fastgpt.create_dataset_calls == [("Intro Statistics", None, None, None)]
 
 
-def test_create_workspace_trims_title_and_optional_models(
-    client: TestClient, fake_fastgpt: FakeFastGPT
+def test_create_workspace_round_trips_all_model_choices(
+    model_capable_client: TestClient, fake_fastgpt: FakeFastGPT
 ) -> None:
-    response = client.post(
+    response = model_capable_client.post(
         "/api/workspaces",
         json={
             "title": "  Intro Statistics  ",
             "vector_model": " embedding-3 ",
-            "agent_model": "   ",
+            "agent_model": " agent-1 ",
             "vlm_model": " vision-1 ",
         },
     )
 
     assert response.status_code == 201
     assert response.json()["title"] == "Intro Statistics"
+    assert response.json()["model_choices"] == {
+        "vector_model": "embedding-3",
+        "agent_model": "agent-1",
+        "vlm_model": "vision-1",
+    }
     assert fake_fastgpt.create_dataset_calls == [
-        ("Intro Statistics", "embedding-3", None, "vision-1")
+        ("Intro Statistics", "embedding-3", "agent-1", "vision-1")
     ]
+
+    listed = model_capable_client.get("/api/workspaces")
+    detail = model_capable_client.get(f"/api/workspaces/{response.json()['id']}")
+    assert listed.json()[0]["model_choices"] == response.json()["model_choices"]
+    assert detail.json()["model_choices"] == response.json()["model_choices"]
+
+
+def test_workspace_model_choices_cannot_be_patched(
+    client: TestClient, seeded_workspace: Workspace
+) -> None:
+    response = client.patch(
+        f"/api/workspaces/{seeded_workspace.id}",
+        json={"title": "Renamed", "vector_model": "replacement"},
+    )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.parametrize("title", ["", "   ", "x" * 121])
@@ -203,7 +225,16 @@ def test_external_creation_failure_returns_safe_gateway_and_does_not_persist(
 def test_db_failure_compensates_exact_created_dataset_and_remains_safe(
     client: TestClient, fake_fastgpt: FakeFastGPT, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def fail_create(self: WorkspaceRepository, *, title: str, dataset_id: str):
+    def fail_create(
+        self: WorkspaceRepository,
+        *,
+        title: str,
+        dataset_id: str,
+        vector_model: str | None,
+        agent_model: str | None,
+        vlm_model: str | None,
+    ) -> None:
+        del self, title, dataset_id, vector_model, agent_model, vlm_model
         raise WorkspacePersistenceError(
             "not public", outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
         )

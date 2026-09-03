@@ -12,9 +12,10 @@ from grounded_tutor.domain.schemas import (
     WorkspaceUpdate,
 )
 from grounded_tutor.repositories.workspaces import WorkspacePersistenceError
-from grounded_tutor.routers.common import api_error, parse_uuid
+from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, api_error, parse_uuid
 from grounded_tutor.services.workspaces import (
     ExternalWorkspaceServiceError,
+    UnsupportedWorkspaceModelError,
     WorkspaceNotFoundError,
     WorkspaceService,
 )
@@ -22,6 +23,7 @@ from grounded_tutor.services.workspaces import (
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 VALIDATION_ERROR_RESPONSE = {
+    **DEMO_WRITE_ERROR_RESPONSE,
     422: {"model": ApiErrorResponse, "description": "Workspace input is invalid."}
 }
 CREATE_ERROR_RESPONSES = {
@@ -58,6 +60,8 @@ async def create_workspace(
         )
     except ExternalWorkspaceServiceError:
         api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+    except UnsupportedWorkspaceModelError:
+        api_error(status.HTTP_422_UNPROCESSABLE_CONTENT, "unsupported_workspace_model")
     except WorkspacePersistenceError:
         api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
     return WorkspaceResponse.model_validate(workspace)

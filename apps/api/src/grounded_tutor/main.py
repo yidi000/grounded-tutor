@@ -9,7 +9,8 @@ from grounded_tutor.adapters.fakes import FakeFastGPT
 from grounded_tutor.adapters.fastgpt import FastGPTClient, FastGPTPort
 from grounded_tutor.config import get_settings
 from grounded_tutor.db import engine, ensure_database_is_current
-from grounded_tutor.middleware import PreviewRequestBodyLimitMiddleware
+from grounded_tutor.middleware import DemoReadOnlyMiddleware, PreviewRequestBodyLimitMiddleware
+from grounded_tutor.routers.capabilities import router as capabilities_router
 from grounded_tutor.routers.previews import router as previews_router
 from grounded_tutor.routers.sources import router as sources_router
 from grounded_tutor.routers.workspaces import router as workspaces_router
@@ -42,6 +43,11 @@ app.add_middleware(
     PreviewRequestBodyLimitMiddleware,
     settings_provider=get_settings,
 )
+app.add_middleware(
+    DemoReadOnlyMiddleware,
+    settings_provider=get_settings,
+)
+app.include_router(capabilities_router)
 app.include_router(workspaces_router)
 app.include_router(previews_router)
 app.include_router(sources_router)

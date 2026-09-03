@@ -6,12 +6,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from grounded_tutor.domain.errors import PublicErrorCode
 from grounded_tutor.domain.ingestion import ChunkSettings, TextPreviewRequest
 from grounded_tutor.domain.models import SourceStatus, SourceType
 
 
 class ApiErrorDetail(BaseModel):
-    code: str
+    code: PublicErrorCode
 
 
 class ApiErrorResponse(BaseModel):
@@ -41,12 +42,20 @@ class WorkspaceCreate(BaseModel):
 
 
 class WorkspaceUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(min_length=1, max_length=120)
 
     @field_validator("title", mode="before")
     @classmethod
     def trim_title(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+
+class WorkspaceModelChoices(BaseModel):
+    vector_model: str | None
+    agent_model: str | None
+    vlm_model: str | None
 
 
 class WorkspaceResponse(BaseModel):
@@ -56,6 +65,7 @@ class WorkspaceResponse(BaseModel):
     title: str
     source_count: int
     ready_source_count: int
+    model_choices: WorkspaceModelChoices
     created_at: datetime
     updated_at: datetime
 
@@ -109,3 +119,17 @@ class SourceIngestionResponse(BaseModel):
 
     source: SourceResponse
     processed_preview: ProcessedPreviewResponse
+
+
+class CapabilityItem(BaseModel):
+    key: str
+    supported: bool
+    disabled_reason: Literal["deployment_not_verified", "demo_read_only"] | None
+
+
+class SourceIngestionCapabilities(BaseModel):
+    accepted_extensions: list[str]
+    max_upload_bytes: int
+    settings: list[CapabilityItem]
+    workspace_models: list[CapabilityItem]
+    read_only_demo: bool

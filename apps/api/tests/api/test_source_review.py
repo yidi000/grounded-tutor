@@ -238,11 +238,11 @@ def test_invalid_lifecycle_status_and_cross_workspace_are_rejected(
     )
 
     assert reprocess_review.status_code == 409
-    assert reprocess_review.json() == {"detail": {"code": "invalid_source_status"}}
+    assert reprocess_review.json() == {"detail": {"code": "invalid_source_transition"}}
     assert cross_accept.status_code == 404
     assert cross_accept.json() == {"detail": {"code": "source_not_found"}}
     assert accept_ready.status_code == 409
-    assert accept_ready.json() == {"detail": {"code": "invalid_source_status"}}
+    assert accept_ready.json() == {"detail": {"code": "invalid_source_transition"}}
 
 
 def test_delete_soft_deletes_source_filters_counts_and_disables_collection(
@@ -314,7 +314,7 @@ def test_reprocess_rejects_second_pending_replacement(
 
     assert first.status_code == 201
     assert second.status_code == 409
-    assert second.json() == {"detail": {"code": "invalid_source_status"}}
+    assert second.json() == {"detail": {"code": "invalid_source_transition"}}
     assert len(fake_fastgpt.collections) == 2
 
 
@@ -336,7 +336,7 @@ def test_delete_rejects_ready_source_with_pending_replacement(
     )
 
     assert response.status_code == 409
-    assert response.json() == {"detail": {"code": "invalid_source_status"}}
+    assert response.json() == {"detail": {"code": "invalid_source_transition"}}
     assert fake_fastgpt.collections["collection-1"].forbidden is False
 
 

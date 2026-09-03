@@ -27,8 +27,9 @@ def get_source_locks(request: Request) -> WorkspaceLockRegistry:
 def get_workspace_service(
     session: Annotated[Session, Depends(get_session)],
     fastgpt: Annotated[FastGPTPort, Depends(get_fastgpt)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> WorkspaceService:
-    return WorkspaceService(WorkspaceRepository(session), fastgpt)
+    return WorkspaceService(WorkspaceRepository(session), fastgpt, settings)
 
 
 def get_preview_service(

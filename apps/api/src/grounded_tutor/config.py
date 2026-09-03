@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = SecretStr("")
     llm_model: str = "gpt-4o-mini"
     external_mode: Literal["fake", "live"] = "fake"
+    demo_read_only: bool = False
+    supports_custom_pdf_parse: bool = False
+    supports_vector_model: bool = False
+    supports_agent_model: bool = False
+    supports_vlm_model: bool = False
+    supports_image_files: bool = False
     max_upload_bytes: int = Field(default=20_000_000, gt=0)
     max_preview_text_bytes: int = Field(default=20_000_000, gt=0)
     max_extracted_characters: int = Field(default=40_000_000, gt=0)
@@ -52,3 +58,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def capability_request_is_supported(*, requested: object, supported: bool) -> bool:
+    return not bool(requested) or supported

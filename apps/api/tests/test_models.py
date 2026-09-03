@@ -4,6 +4,7 @@ import sys
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 from alembic.config import Config
@@ -396,3 +397,49 @@ def test_source_lifecycle_migration_backfills_existing_source_lineage(
     assert source is not None
     assert source.lineage_id == source.id
     assert lineage_column["nullable"] is False
+
+
+def test_workspace_model_choice_migration_preserves_legacy_rows_and_round_trips(
+    temporary_database_url: str,
+) -> None:
+    config = get_alembic_config(Settings(database_url=temporary_database_url))
+    command.upgrade(config, "0002_source_lifecycle")
+    workspace_id = "30000000000000000000000000000000"
+    engine = create_database_engine(Settings(database_url=temporary_database_url))
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "INSERT INTO workspaces (id, title, dataset_id) VALUES (?, ?, ?)",
+                (workspace_id, "Legacy", "dataset-legacy-models"),
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+    migrated_engine = create_database_engine(Settings(database_url=temporary_database_url))
+    try:
+        column_names = {
+            column["name"] for column in inspect(migrated_engine).get_columns("workspaces")
+        }
+        with Session(migrated_engine) as session:
+            legacy = session.get(Workspace, UUID(workspace_id))
+            assert legacy is not None
+            assert (legacy.vector_model, legacy.agent_model, legacy.vlm_model) == (
+                None,
+                None,
+                None,
+            )
+            legacy.vector_model = "text-embedding-3-small"
+            legacy.agent_model = "agent-1"
+            legacy.vlm_model = "vision-1"
+            session.commit()
+            session.refresh(legacy)
+            assert (legacy.vector_model, legacy.agent_model, legacy.vlm_model) == (
+                "text-embedding-3-small",
+                "agent-1",
+                "vision-1",
+            )
+    finally:
+        migrated_engine.dispose()
+
+    assert {"vector_model", "agent_model", "vlm_model"} <= column_names

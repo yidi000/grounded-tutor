@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from grounded_tutor.adapters.fastgpt import FastGPTPort
+from grounded_tutor.config import Settings, capability_request_is_supported
 from grounded_tutor.repositories.workspaces import (
     WorkspacePersistenceError,
     WorkspacePersistenceOutcome,
@@ -19,10 +20,20 @@ class ExternalWorkspaceServiceError(RuntimeError):
     """FastGPT could not complete a workspace operation."""
 
 
+class UnsupportedWorkspaceModelError(ValueError):
+    """A requested model capability is not verified for this deployment."""
+
+
 class WorkspaceService:
-    def __init__(self, repository: WorkspaceRepository, fastgpt: FastGPTPort) -> None:
+    def __init__(
+        self,
+        repository: WorkspaceRepository,
+        fastgpt: FastGPTPort,
+        settings: Settings | None = None,
+    ) -> None:
         self._repository = repository
         self._fastgpt = fastgpt
+        self._settings = settings or Settings()
 
     async def create(
         self,
@@ -32,6 +43,23 @@ class WorkspaceService:
         agent_model: str | None,
         vlm_model: str | None,
     ) -> WorkspaceSummary:
+        if not all(
+            (
+                capability_request_is_supported(
+                    requested=vector_model,
+                    supported=self._settings.supports_vector_model,
+                ),
+                capability_request_is_supported(
+                    requested=agent_model,
+                    supported=self._settings.supports_agent_model,
+                ),
+                capability_request_is_supported(
+                    requested=vlm_model,
+                    supported=self._settings.supports_vlm_model,
+                ),
+            )
+        ):
+            raise UnsupportedWorkspaceModelError
         try:
             dataset = await self._fastgpt.create_dataset(
                 title,
@@ -43,7 +71,13 @@ class WorkspaceService:
             raise ExternalWorkspaceServiceError("Dataset creation failed.") from error
 
         try:
-            return self._repository.create(title=title, dataset_id=dataset.dataset_id)
+            return self._repository.create(
+                title=title,
+                dataset_id=dataset.dataset_id,
+                vector_model=vector_model,
+                agent_model=agent_model,
+                vlm_model=vlm_model,
+            )
         except WorkspacePersistenceError as error:
             if error.outcome is WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED:
                 await self._compensate_dataset_creation(dataset.dataset_id)

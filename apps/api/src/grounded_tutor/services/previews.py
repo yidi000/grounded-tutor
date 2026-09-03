@@ -16,6 +16,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from pypdf import PdfReader
 
+from grounded_tutor.domain.errors import PublicErrorCode
 from grounded_tutor.domain.ingestion import (
     ChunkSettings,
     PreviewItem,
@@ -59,15 +60,13 @@ class PreviewError(RuntimeError):
         "source_too_large": "The extracted source text exceeds the preview limit.",
         "source_work_limit_exceeded": "The source exceeds the preview processing limit.",
         "unsafe_archive": "The document archive exceeds safe preview limits.",
-        "unreadable_text": "The pasted text is not valid Unicode text.",
-        "invalid_source_name": "The source name is invalid.",
+        "validation_error": "The source name is invalid.",
         "unsupported_file_type": "This file type is not supported for preview.",
         "empty_source": "The source does not contain readable text.",
-        "encrypted_pdf": "Encrypted PDF files cannot be previewed.",
         "unreadable_file": "The file could not be read for preview.",
     }
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: PublicErrorCode) -> None:
         self.code = code
         super().__init__(self._MESSAGES[code])
 
@@ -195,7 +194,7 @@ def preview_file(
     _validate_file_size(content, max_upload_bytes)
     source_name = filename.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
     if not 1 <= len(source_name) <= 255:
-        raise PreviewError("invalid_source_name")
+        raise PreviewError("validation_error")
     suffix = Path(source_name).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS or not Path(source_name).stem:
         raise PreviewError("unsupported_file_type")
@@ -290,7 +289,7 @@ def _extract_text(
         return "\n\n".join(blocks)
     reader = PdfReader(BytesIO(content))
     if reader.is_encrypted:
-        raise PreviewError("encrypted_pdf")
+        raise PreviewError("unreadable_file")
     if len(reader.pages) > MAX_PDF_PAGES:
         raise PreviewError("source_work_limit_exceeded")
     pages: list[str] = []
@@ -562,7 +561,7 @@ def _validate_text_budget(
         try:
             text_bytes = len(text.encode("utf-8"))
         except UnicodeEncodeError:
-            raise PreviewError("unreadable_text") from None
+            raise PreviewError("unreadable_file") from None
         if text_bytes > max_text_bytes:
             raise PreviewError("text_too_large")
     if max_characters is not None:

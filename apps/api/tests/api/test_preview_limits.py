@@ -21,6 +21,7 @@ async def _call_asgi(
     body_messages: list[dict[str, object]],
     headers: list[tuple[bytes, bytes]],
     endpoint: str = "text",
+    path: str | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     sent: list[dict[str, object]] = []
     receive_calls = 0
@@ -42,7 +43,8 @@ async def _call_asgi(
             "http_version": "1.1",
             "method": "POST",
             "scheme": "http",
-            "path": (
+            "path": path
+            or (
                 "/api/workspaces/00000000-0000-0000-0000-000000000000/"
                 f"source-previews/{endpoint}"
             ),
@@ -79,6 +81,58 @@ async def test_oversized_content_length_is_rejected_before_receive(
             (b"content-type", b"application/json"),
             (b"content-length", str(PREVIEW_REQUEST_OVERHEAD_BYTES + 9).encode()),
         ],
+    )
+
+    assert _response_status(sent) == 413
+    assert receive_calls == 0
+
+
+@pytest.mark.parametrize("endpoint", ["text", "file"])
+@pytest.mark.asyncio
+async def test_oversized_reprocess_body_is_rejected_before_receive(
+    endpoint: str,
+) -> None:
+    sent: list[dict[str, object]] = []
+    receive_calls = 0
+
+    async def receive() -> dict[str, object]:
+        nonlocal receive_calls
+        receive_calls += 1
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        sent.append(message)
+
+    async def downstream(scope, receive, send) -> None:
+        del scope, receive
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    path = (
+        "/api/workspaces/00000000-0000-0000-0000-000000000000/sources/"
+        f"10000000-0000-0000-0000-000000000000/reprocess/{endpoint}"
+    )
+    middleware = PreviewRequestBodyLimitMiddleware(
+        downstream,
+        settings_provider=lambda: Settings(
+            max_preview_text_bytes=8,
+            max_upload_bytes=8,
+        ),
+    )
+    await middleware(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": path,
+            "headers": [
+                (
+                    b"content-length",
+                    str(PREVIEW_REQUEST_OVERHEAD_BYTES + 9).encode(),
+                )
+            ],
+        },
+        receive,
+        send,
     )
 
     assert _response_status(sent) == 413

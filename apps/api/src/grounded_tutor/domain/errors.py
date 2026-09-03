@@ -1,0 +1,26 @@
+from typing import Literal
+
+PublicErrorCode = Literal[
+    "demo_read_only",
+    "empty_processed_source",
+    "empty_source",
+    "external_service_error",
+    "file_too_large",
+    "idempotency_key_reused",
+    "invalid_chunk_settings",
+    "invalid_source_transition",
+    "persistence_error",
+    "processed_preview_unavailable",
+    "request_body_too_large",
+    "source_not_found",
+    "source_too_large",
+    "source_work_limit_exceeded",
+    "text_too_large",
+    "unreadable_file",
+    "unsafe_archive",
+    "unsupported_file_type",
+    "unsupported_workspace_model",
+    "validation_error",
+    "workspace_ingestion_busy",
+    "workspace_not_found",
+]

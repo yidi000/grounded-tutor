@@ -40,6 +40,9 @@ class Workspace(Base):
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     dataset_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    vector_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    agent_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    vlm_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()

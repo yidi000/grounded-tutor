@@ -37,16 +37,41 @@ class WorkspaceSummary:
     title: str
     source_count: int
     ready_source_count: int
+    vector_model: str | None
+    agent_model: str | None
+    vlm_model: str | None
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def model_choices(self) -> dict[str, str | None]:
+        return {
+            "vector_model": self.vector_model,
+            "agent_model": self.agent_model,
+            "vlm_model": self.vlm_model,
+        }
 
 
 class WorkspaceRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def create(self, *, title: str, dataset_id: str) -> WorkspaceSummary:
-        workspace = Workspace(title=title, dataset_id=dataset_id)
+    def create(
+        self,
+        *,
+        title: str,
+        dataset_id: str,
+        vector_model: str | None,
+        agent_model: str | None,
+        vlm_model: str | None,
+    ) -> WorkspaceSummary:
+        workspace = Workspace(
+            title=title,
+            dataset_id=dataset_id,
+            vector_model=vector_model,
+            agent_model=agent_model,
+            vlm_model=vlm_model,
+        )
         try:
             self._session.add(workspace)
             self._session.flush()
@@ -131,6 +156,9 @@ def _summary_query():
         select(
             Workspace.id,
             Workspace.title,
+            Workspace.vector_model,
+            Workspace.agent_model,
+            Workspace.vlm_model,
             source_count,
             ready_source_count,
             Workspace.created_at,
@@ -144,7 +172,15 @@ def _summary_query():
                 Source.deleted_at.is_(None),
             ),
         )
-        .group_by(Workspace.id, Workspace.title, Workspace.created_at, Workspace.updated_at)
+        .group_by(
+            Workspace.id,
+            Workspace.title,
+            Workspace.vector_model,
+            Workspace.agent_model,
+            Workspace.vlm_model,
+            Workspace.created_at,
+            Workspace.updated_at,
+        )
         .order_by(Workspace.created_at.desc(), Workspace.id.desc())
     )
 
@@ -157,6 +193,9 @@ def _summary(
         title=workspace.title,
         source_count=source_count,
         ready_source_count=ready_source_count,
+        vector_model=workspace.vector_model,
+        agent_model=workspace.agent_model,
+        vlm_model=workspace.vlm_model,
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
     )
@@ -168,6 +207,9 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkspaceSummary:
         title=row["title"],  # type: ignore[arg-type]
         source_count=row["source_count"],  # type: ignore[arg-type]
         ready_source_count=row["ready_source_count"],  # type: ignore[arg-type]
+        vector_model=row["vector_model"],  # type: ignore[arg-type]
+        agent_model=row["agent_model"],  # type: ignore[arg-type]
+        vlm_model=row["vlm_model"],  # type: ignore[arg-type]
         created_at=row["created_at"],  # type: ignore[arg-type]
         updated_at=row["updated_at"],  # type: ignore[arg-type]
     )

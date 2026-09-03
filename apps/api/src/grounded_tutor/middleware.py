@@ -9,6 +9,34 @@ from grounded_tutor.config import Settings
 
 PREVIEW_REQUEST_OVERHEAD_BYTES = 1_048_576
 MAX_PREVIEW_REQUEST_MESSAGES = 4_096
+READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+class DemoReadOnlyMiddleware:
+    """Reject demo writes before routing or request-body reads."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        settings_provider: Callable[[], Settings],
+    ) -> None:
+        self._app = app
+        self._settings_provider = settings_provider
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] == "http"
+            and scope.get("method") not in READ_ONLY_METHODS
+            and self._settings_provider().demo_read_only
+        ):
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": {"code": "demo_read_only"}},
+            )
+            await response(scope, receive, send)
+            return
+        await self._app(scope, receive, send)
 
 
 class PreviewRequestBodyLimitMiddleware:
@@ -74,9 +102,13 @@ class PreviewRequestBodyLimitMiddleware:
             return None
         path = scope.get("path", "")
         settings = self._settings_provider()
-        if path.endswith(("/source-previews/file", "/sources/file")):
+        if path.endswith(
+            ("/source-previews/file", "/sources/file", "/reprocess/file")
+        ):
             content_limit = settings.max_upload_bytes
-        elif path.endswith(("/source-previews/text", "/sources/text")):
+        elif path.endswith(
+            ("/source-previews/text", "/sources/text", "/reprocess/text")
+        ):
             content_limit = settings.max_preview_text_bytes
         else:
             return None

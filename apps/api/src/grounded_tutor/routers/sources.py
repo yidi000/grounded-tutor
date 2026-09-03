@@ -4,6 +4,7 @@ from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 
+from grounded_tutor.config import Settings, get_settings
 from grounded_tutor.dependencies import get_source_service
 from grounded_tutor.domain.schemas import (
     ApiErrorResponse,
@@ -13,7 +14,13 @@ from grounded_tutor.domain.schemas import (
     TextSourceCreate,
 )
 from grounded_tutor.repositories.sources import SourcePersistenceError
-from grounded_tutor.routers.common import api_error, parse_chunk_settings, parse_uuid
+from grounded_tutor.routers.common import (
+    DEMO_WRITE_ERROR_RESPONSE,
+    api_error,
+    parse_chunk_settings,
+    parse_uuid,
+    require_chunk_capability,
+)
 from grounded_tutor.services.previews import PreviewError
 from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError
 from grounded_tutor.services.sources import (
@@ -38,9 +45,16 @@ COMMON_ERROR_RESPONSES = {
     500: {"model": ApiErrorResponse, "description": "Local persistence failed."},
     502: {"model": ApiErrorResponse, "description": "External service failed."},
 }
-FILE_ERROR_RESPONSES = {
+WRITE_ERROR_RESPONSES = {
     **COMMON_ERROR_RESPONSES,
+    **DEMO_WRITE_ERROR_RESPONSE,
+}
+INGESTION_ERROR_RESPONSES = {
+    **WRITE_ERROR_RESPONSES,
     413: {"model": ApiErrorResponse, "description": "Source resource limit exceeded."},
+}
+FILE_ERROR_RESPONSES = {
+    **INGESTION_ERROR_RESPONSES,
     415: {"model": ApiErrorResponse, "description": "File type is unsupported."},
 }
 
@@ -49,13 +63,15 @@ FILE_ERROR_RESPONSES = {
     "/text",
     response_model=SourceIngestionResponse,
     status_code=status.HTTP_201_CREATED,
-    responses=COMMON_ERROR_RESPONSES,
+    responses=INGESTION_ERROR_RESPONSES,
 )
 async def ingest_text_source(
     workspace_id: str,
     payload: TextSourceCreate,
     service: Annotated[SourceService, Depends(get_source_service)],
+    runtime_settings: Annotated[Settings, Depends(get_settings)],
 ) -> SourceIngestionResponse:
+    require_chunk_capability(payload.settings, runtime_settings)
     try:
         result = await service.ingest_text(
             workspace_id=parse_uuid(workspace_id, "workspace_not_found"),
@@ -86,9 +102,11 @@ async def ingest_file_source(
     workspace_id: str,
     service: Annotated[SourceService, Depends(get_source_service)],
     file: Annotated[UploadFile, File()],
+    runtime_settings: Annotated[Settings, Depends(get_settings)],
     settings: Annotated[str, Form()] = "{}",
 ) -> SourceIngestionResponse:
     chunk_settings = parse_chunk_settings(settings)
+    require_chunk_capability(chunk_settings, runtime_settings)
     content = await file.read(service.max_upload_bytes + 1)
     try:
         result = await service.ingest_file(
@@ -158,7 +176,7 @@ async def get_processed_preview(
 @router.post(
     "/{source_id}/accept",
     response_model=SourceResponse,
-    responses=COMMON_ERROR_RESPONSES,
+    responses=WRITE_ERROR_RESPONSES,
 )
 async def accept_source(
     workspace_id: str,
@@ -187,14 +205,16 @@ async def accept_source(
     "/{source_id}/reprocess/text",
     response_model=SourceIngestionResponse,
     status_code=status.HTTP_201_CREATED,
-    responses=COMMON_ERROR_RESPONSES,
+    responses=INGESTION_ERROR_RESPONSES,
 )
 async def reprocess_text_source(
     workspace_id: str,
     source_id: str,
     payload: TextSourceCreate,
     service: Annotated[SourceService, Depends(get_source_service)],
+    runtime_settings: Annotated[Settings, Depends(get_settings)],
 ) -> SourceIngestionResponse:
+    require_chunk_capability(payload.settings, runtime_settings)
     try:
         result = await service.reprocess_text(
             workspace_id=parse_uuid(workspace_id, "workspace_not_found"),
@@ -231,9 +251,11 @@ async def reprocess_file_source(
     source_id: str,
     service: Annotated[SourceService, Depends(get_source_service)],
     file: Annotated[UploadFile, File()],
+    runtime_settings: Annotated[Settings, Depends(get_settings)],
     settings: Annotated[str, Form()] = "{}",
 ) -> SourceIngestionResponse:
     chunk_settings = parse_chunk_settings(settings)
+    require_chunk_capability(chunk_settings, runtime_settings)
     content = await file.read(service.max_upload_bytes + 1)
     try:
         result = await service.reprocess_file(
@@ -263,7 +285,7 @@ async def reprocess_file_source(
 @router.delete(
     "/{source_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    responses=COMMON_ERROR_RESPONSES,
+    responses=WRITE_ERROR_RESPONSES,
 )
 async def delete_source(
     workspace_id: str,

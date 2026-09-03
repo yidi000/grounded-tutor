@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from grounded_tutor.adapters.fastgpt import CollectionListItem, FastGPTPort, ProcessedChunk
+from grounded_tutor.domain.errors import PublicErrorCode
 from grounded_tutor.domain.ingestion import ChunkSettings
 from grounded_tutor.domain.models import SourceStatus, SourceType
 from grounded_tutor.domain.schemas import (
@@ -62,7 +63,7 @@ class ExternalSourceServiceError(RuntimeError):
 
 
 class SourceLifecycleConflictError(RuntimeError):
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: PublicErrorCode) -> None:
         self.code = code
         super().__init__(code)
 
@@ -211,11 +212,11 @@ class SourceService:
                 if replaced is None:
                     raise SourceNotFoundError
                 if replaced.summary.status is not SourceStatus.READY:
-                    raise SourceLifecycleConflictError("invalid_source_status")
+                    raise SourceLifecycleConflictError("invalid_source_transition")
                 if self._repository.has_pending_review(
                     workspace_id, replaced.summary.lineage_id
                 ):
-                    raise SourceLifecycleConflictError("invalid_source_status")
+                    raise SourceLifecycleConflictError("invalid_source_transition")
                 lineage_id = replaced.summary.lineage_id
                 version = replaced.summary.version + 1
             collection_id: str | None = None
@@ -470,7 +471,7 @@ class SourceService:
             if source is None:
                 raise SourceNotFoundError
             if source.summary.status is not SourceStatus.REVIEW:
-                raise SourceLifecycleConflictError("invalid_source_status")
+                raise SourceLifecycleConflictError("invalid_source_transition")
             if source.collection_id is None:
                 raise SourceLifecycleConflictError("empty_processed_source")
             try:
@@ -488,7 +489,7 @@ class SourceService:
                     workspace_id, source.summary.replaces_source_id
                 )
                 if replaced is None or replaced.summary.status is not SourceStatus.READY:
-                    raise SourceLifecycleConflictError("invalid_source_status")
+                    raise SourceLifecycleConflictError("invalid_source_transition")
 
             try:
                 await self._set_collection_forbidden_confirmed(
@@ -644,7 +645,7 @@ class SourceService:
             if source.summary.status is SourceStatus.READY and self._repository.has_pending_review(
                 workspace_id, source.summary.lineage_id
             ):
-                raise SourceLifecycleConflictError("invalid_source_status")
+                raise SourceLifecycleConflictError("invalid_source_transition")
             if source.collection_id is not None:
                 try:
                     await self._set_collection_forbidden_confirmed(
@@ -797,7 +798,7 @@ def _public_preview_text(value: str) -> tuple[str, bool]:
 
 def _validate_text(name: str, text: str, max_text_bytes: int) -> None:
     if not name or len(name) > 255:
-        raise PreviewError("invalid_source_name")
+        raise PreviewError("validation_error")
     if len(text.encode("utf-8")) > max_text_bytes:
         raise PreviewError("text_too_large")
     if not text.strip():
@@ -809,7 +810,7 @@ def _validate_file(filename: str, content: bytes, max_upload_bytes: int) -> str:
         raise PreviewError("file_too_large")
     safe_name = filename.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
     if not 1 <= len(safe_name) <= 255:
-        raise PreviewError("invalid_source_name")
+        raise PreviewError("validation_error")
     path = Path(safe_name)
     if path.suffix.lower() not in SUPPORTED_EXTENSIONS or not path.stem:
         raise PreviewError("unsupported_file_type")
