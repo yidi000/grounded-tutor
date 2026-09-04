@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
 
@@ -485,7 +486,7 @@ describe("App", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "在本地使用我的资料" }),
-    ).toHaveAttribute("href", "/README.md#fake-adapter-quick-start");
+    ).toHaveAttribute("href", "/local-setup.html");
     expect(screen.getByLabelText("向资料提问")).toBeDisabled();
     expect(
       screen.queryByRole("button", { name: "重命名学习主题" }),
@@ -494,5 +495,110 @@ describe("App", () => {
     expect(demoFixture.capabilities.read_only_demo).toBe(true);
     expect(Object.isFrozen(demoFixture)).toBe(true);
     expect(Object.isFrozen(demoFixture.capabilities)).toBe(true);
+  });
+
+  it("sends a local ASK and opens its structured citation", async () => {
+    const user = userEvent.setup();
+    const workspaceId = "00000000-0000-4000-8000-000000000001";
+    const sourceId = "00000000-0000-4000-8000-000000000002";
+    const newWorkspaceId = "00000000-0000-4000-8000-000000000003";
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "/api/capabilities/source-ingestion") return Response.json({ accepted_extensions: [".txt"], max_upload_bytes: 10_000, settings: [], workspace_models: [], read_only_demo: false });
+      if (url === "/api/workspaces" && init?.method === "POST") return Response.json({ id: newWorkspaceId, title: "Probability", source_count: 0, ready_source_count: 0, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-04T00:00:00Z", updated_at: "2026-09-04T00:00:00Z" });
+      if (url === "/api/workspaces") return Response.json([{ id: workspaceId, title: "Intro Statistics", source_count: 1, ready_source_count: 1, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-04T00:00:00Z", updated_at: "2026-09-04T00:00:00Z" }]);
+      if (url === `/api/workspaces/${workspaceId}/sources`) return Response.json([]);
+      if (url === `/api/workspaces/${newWorkspaceId}/sources`) return Response.json([]);
+      if (url === `/api/workspaces/${workspaceId}/chat`) return Response.json({ conversation_id: "00000000-0000-4000-8000-000000000010", message_id: "00000000-0000-4000-8000-000000000011", status: "ok", answer_blocks: [{ id: "block-1", kind: "answer", text: "The mean is the average.", citation_ids: ["citation-1"] }], citations: [{ id: "citation-1", source_id: sourceId, source_name: "Week 1 notes", source_version: 1, chunk_id: "chunk-1", excerpt: "Mean is an average.", context_before: null, context_after: null, locator: { kind: "chunk", label: "匹配片段 1" } }], suggested_actions: [] });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App mode="local" />);
+    await screen.findByRole("heading", { name: "Intro Statistics" });
+    const input = screen.getByLabelText("向资料提问");
+    await user.type(input, "What is a mean?");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const anchor = await screen.findByRole("button", { name: "引用 1：Week 1 notes" });
+    await user.click(anchor);
+    expect(screen.getByRole("complementary", { name: "上下文" })).toHaveTextContent("Mean is an average.");
+    const chatRequest = requests.find(({ url }) => url.endsWith("/chat"));
+    expect(JSON.parse(String(chatRequest?.init?.body))).toMatchObject({ conversation_id: null, message: "What is a mean?" });
+
+    await user.click(screen.getByRole("button", { name: "创建学习主题" }));
+    await user.type(screen.getByLabelText("主题名称"), "Probability");
+    await user.click(screen.getByRole("button", { name: "创建主题" }));
+    const createdDialog = await screen.findByRole("dialog", { name: "主题已创建" });
+    await user.click(within(createdDialog).getByRole("button", { name: "进入主题" }));
+
+    expect(screen.queryByText("The mean is the average.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "引用 1：Week 1 notes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "上下文" })).not.toHaveTextContent("Mean is an average.");
+  });
+
+  it("discards an ASK response after switching Workspace", async () => {
+    const user = userEvent.setup();
+    const firstId = "00000000-0000-4000-8000-000000000001";
+    const secondId = "00000000-0000-4000-8000-000000000002";
+    let resolveFirst: ((response: Response) => void) | undefined;
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url === "/api/capabilities/source-ingestion") return Response.json({ accepted_extensions: [".txt"], max_upload_bytes: 10_000, settings: [], workspace_models: [], read_only_demo: false });
+      if (url === "/api/workspaces") return Response.json([
+        { id: firstId, title: "Workspace A", source_count: 1, ready_source_count: 1, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-04T00:00:00Z", updated_at: "2026-09-04T00:00:00Z" },
+        { id: secondId, title: "Workspace B", source_count: 1, ready_source_count: 1, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-04T00:00:00Z", updated_at: "2026-09-04T00:00:00Z" },
+      ]);
+      if (url.endsWith("/sources")) return Response.json([]);
+      if (url === `/api/workspaces/${firstId}/chat`) return new Promise<Response>((resolve) => { resolveFirst = resolve; });
+      if (url === `/api/workspaces/${secondId}/chat`) return Response.json({ conversation_id: "00000000-0000-4000-8000-000000000020", message_id: "00000000-0000-4000-8000-000000000021", status: "ok", answer_blocks: [{ id: "block-b", kind: "answer", text: "Answer from B.", citation_ids: ["citation-b"] }], citations: [{ id: "citation-b", source_id: secondId, source_name: "Notes B", source_version: 1, chunk_id: "chunk-b", excerpt: "Evidence B", context_before: null, context_after: null, locator: { kind: "chunk", label: "片段 B" } }], suggested_actions: [] });
+      throw new Error(`Unexpected request ${url}`);
+    }));
+
+    render(<App mode="local" />);
+    await screen.findByRole("heading", { name: "Workspace A" });
+    const input = screen.getByLabelText("向资料提问");
+    await user.type(input, "Question for A");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    expect(requests.filter(({ url }) => url === `/api/workspaces/${firstId}/chat`)).toHaveLength(1);
+    const workspaceB = within(screen.getByRole("navigation", { name: "学习主题" }))
+      .getByText("Workspace B")
+      .closest("button");
+    if (!workspaceB) throw new Error("Workspace B selector is missing");
+    await user.click(workspaceB);
+    expect(screen.getByRole("heading", { name: "Workspace B" })).toBeVisible();
+    const inputB = screen.getByLabelText("向资料提问");
+    expect(inputB).toHaveValue("");
+    expect(inputB).toBeEnabled();
+    await user.type(inputB, "Question for B");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText("Answer from B.")).toBeVisible();
+    const secondRequest = requests.find(({ url }) => url === `/api/workspaces/${secondId}/chat`);
+    expect(JSON.parse(String(secondRequest?.init?.body))).toMatchObject({ conversation_id: null, message: "Question for B" });
+
+    await user.type(inputB, "B draft survives");
+    await act(async () => {
+      resolveFirst?.(Response.json({ conversation_id: "00000000-0000-4000-8000-000000000010", message_id: "00000000-0000-4000-8000-000000000011", status: "ok", answer_blocks: [{ id: "block-a", kind: "answer", text: "Late answer from A.", citation_ids: ["citation-a"] }], citations: [{ id: "citation-a", source_id: firstId, source_name: "Notes A", source_version: 1, chunk_id: "chunk-a", excerpt: "Evidence A", context_before: null, context_after: null, locator: { kind: "chunk", label: "片段 A" } }], suggested_actions: [] }));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Late answer from A.")).not.toBeInTheDocument();
+    expect(inputB).toHaveValue("B draft survives");
+  });
+
+  it("renders a fixed cited answer in demo without network writes", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App mode="demo_read_only" />);
+    await user.click(screen.getByRole("button", { name: /引用 1/ }));
+
+    expect(screen.getByRole("complementary", { name: "上下文" })).toHaveTextContent("RAG");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

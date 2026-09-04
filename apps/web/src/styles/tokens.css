@@ -174,6 +174,28 @@ a {
   letter-spacing: 0.05em;
 }
 
+.composer-send {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  min-width: 64px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--lecture-blue);
+  color: var(--chalk);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.composer-error {
+  margin-top: var(--space-2) !important;
+  color: var(--correction-red) !important;
+  font-weight: 600;
+  opacity: 1 !important;
+}
+
 .sample-label {
   padding: var(--space-1) var(--space-2);
   background: var(--highlighter);
@@ -199,6 +221,211 @@ a {
   justify-content: center;
   overflow: auto;
   padding: var(--space-8);
+}
+
+.conversation-scroll.has-activity {
+  display: block;
+  padding: var(--space-6) var(--space-8);
+}
+
+.conversation-scroll.has-activity > .intro-card {
+  margin: 0 auto var(--space-6);
+}
+
+.chat-view {
+  width: min(100%, 760px);
+  margin: 0 auto;
+}
+
+.chat-exchange {
+  display: grid;
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+}
+
+.user-message {
+  display: flex;
+  max-width: 78%;
+  align-items: flex-start;
+  gap: var(--space-3);
+  justify-self: end;
+}
+
+.user-message > span,
+.assistant-label > span {
+  display: grid;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--chalk);
+  font: 600 10px/1 "IBM Plex Mono", monospace;
+}
+
+.user-message p {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 10px 2px 10px 10px;
+  background: var(--lecture-blue);
+  color: var(--chalk);
+  line-height: 1.7;
+}
+
+.assistant-message {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.assistant-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--lecture-blue);
+  font-size: 12px;
+}
+
+.assistant-label > span {
+  border-radius: 7px;
+}
+
+.answer-block,
+.insufficient-state {
+  padding: var(--space-4) var(--space-6);
+  border: 1px solid #cbd5d9;
+  border-left: 4px solid transparent;
+  border-radius: 10px;
+  background: var(--chalk);
+  transition: border-color 180ms ease, background 180ms ease;
+}
+
+.answer-block-selected {
+  border-left-color: var(--highlighter);
+  background: #fbfddf;
+}
+
+.answer-block > p {
+  margin: 0;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: 17px;
+  line-height: 1.85;
+}
+
+.evidence-anchors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.evidence-anchor {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 9px 5px 5px;
+  border: 1px solid #bac878;
+  border-radius: 999px;
+  background: #f4f7c6;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.evidence-anchor > span:first-child {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--highlighter);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.insufficient-state h2 {
+  margin: 0 0 var(--space-2);
+  font: 700 19px/1.5 "Noto Serif SC", serif;
+}
+
+.insufficient-state p {
+  margin: 0 0 var(--space-3);
+  color: #52666f;
+  font-size: 13px;
+}
+
+.close-citation {
+  position: absolute;
+  top: 72px;
+  right: var(--space-6);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--desk-mist);
+  border-radius: 8px;
+  background: var(--chalk);
+  color: var(--lecture-blue);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.citation-detail > .context-heading {
+  padding-right: 40px;
+}
+
+.citation-locator {
+  margin: calc(var(--space-6) * -1) 0 var(--space-6);
+  color: var(--lecture-blue);
+  font: 600 11px/1.6 "IBM Plex Mono", monospace;
+}
+
+.citation-context,
+.citation-excerpt {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-left: 3px solid var(--desk-mist);
+  background: #f2f5f6;
+}
+
+.citation-excerpt {
+  border-left-color: var(--highlighter);
+  background: #fbfddf;
+}
+
+.citation-context > span,
+.citation-excerpt > span {
+  color: var(--lecture-blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.citation-context p,
+.citation-excerpt blockquote {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.citation-excerpt blockquote {
+  font-family: "Noto Serif SC", serif;
+}
+
+.citation-technical {
+  margin-top: var(--space-4);
+  color: #5a6b72;
+  font-size: 11px;
+}
+
+.citation-technical summary {
+  cursor: pointer;
+}
+
+.citation-technical code {
+  display: block;
+  margin-top: var(--space-2);
+  overflow-wrap: anywhere;
 }
 
 .intro-card {

@@ -1,4 +1,4 @@
-.PHONY: api-dev api-test api-lint web-test web-build verify-foundation
+.PHONY: api-dev api-test api-lint web-test web-build web-e2e verify-foundation
 
 api-dev:
 	.venv/bin/uvicorn grounded_tutor.main:app --app-dir apps/api/src --reload --workers 1
@@ -15,4 +15,7 @@ web-test:
 web-build:
 	npm --prefix apps/web run build
 
-verify-foundation: api-test api-lint web-test web-build
+web-e2e:
+	npm --prefix apps/web exec playwright test -- --config=apps/web/playwright.config.ts apps/web/tests/foundation.spec.ts
+
+verify-foundation: api-test api-lint web-test web-build web-e2e

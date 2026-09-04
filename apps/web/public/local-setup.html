@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>在本地运行 Grounded Tutor</title>
+    <style>
+      :root { color: #172a32; background: #e8edf0; font: 16px/1.7 system-ui, sans-serif; }
+      body { max-width: 760px; margin: 0 auto; padding: 64px 24px; }
+      main { padding: 40px; border-radius: 12px; background: #f7fafb; }
+      h1 { margin-top: 0; font-family: ui-serif, serif; font-size: 40px; line-height: 1.25; }
+      code { display: block; margin: 8px 0 20px; padding: 12px 16px; overflow-x: auto; border-left: 4px solid #d9e65b; background: #172a32; color: #f7fafb; }
+      a { color: #2e5e78; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>本地完整模式</p>
+      <h1>在本地运行 Grounded Tutor</h1>
+      <p>取得项目代码后，在仓库根目录依次执行：</p>
+      <code>python3 -m venv .venv<br />.venv/bin/pip install -e 'apps/api[test]'<br />npm --prefix apps/web ci<br />.venv/bin/alembic -c apps/api/alembic.ini upgrade head</code>
+      <p>然后分别打开两个终端：</p>
+      <code>make api-dev</code>
+      <code>npm --prefix apps/web run dev</code>
+      <p>默认使用内置 fake adapter，不需要外部 API Key；终端会显示本地访问地址。</p>
+      <a href="/">返回只读示例</a>
+    </main>
+  </body>
+</html>

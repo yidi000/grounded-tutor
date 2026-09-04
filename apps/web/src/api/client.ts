@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   ApiErrorResponseSchema,
+  ChatResponseSchema,
   PreviewResponseSchema,
   ProcessedPreviewResponseSchema,
   SourceIngestionResponseSchema,
@@ -9,6 +10,7 @@ import {
   WorkspaceResponseSchema,
   type PublicErrorCode,
   type ChunkSettings,
+  type ChatRequest,
   type WorkspaceCreate,
   type WorkspaceUpdate,
 } from "./types";
@@ -154,4 +156,10 @@ export const api = {
       throw new ApiError(response.status, code);
     }
   },
+  ask: (workspaceId: string, payload: ChatRequest) =>
+    apiFetch(
+      ChatResponseSchema,
+      `/api/workspaces/${workspaceId}/chat`,
+      json(payload),
+    ),
 };

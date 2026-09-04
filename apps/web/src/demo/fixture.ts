@@ -1,5 +1,6 @@
 import type {
   CapabilityItem,
+  ChatResponse,
   SourceIngestionCapabilities,
 } from "../api/types";
 
@@ -22,6 +23,7 @@ export type DemoFixture = Readonly<{
   }>;
   localInstructionsUrl: string;
   capabilities: ReadonlyCapabilities;
+  exchange: Readonly<{ question: string; response: ChatResponse }>;
 }>;
 
 const demoDisabled = (key: string): Readonly<CapabilityItem> =>
@@ -55,11 +57,43 @@ const capabilities: ReadonlyCapabilities = Object.freeze({
   read_only_demo: true,
 });
 
+const demoResponse: ChatResponse = {
+  conversation_id: "00000000-0000-4000-8000-000000000010",
+  message_id: "00000000-0000-4000-8000-000000000011",
+  status: "ok",
+  answer_blocks: [
+    {
+      id: "demo-block-1",
+      kind: "answer",
+      text: "RAG 先从资料中检索相关片段，再让模型依据这些片段组织回答。显示引用让学习者能核对结论是否真的受到资料支持。",
+      citation_ids: ["demo-citation-1"],
+    },
+  ],
+  citations: [
+    {
+      id: "demo-citation-1",
+      source_id: "00000000-0000-4000-8000-000000000002",
+      source_name: "RAG 学习笔记",
+      source_version: 1,
+      chunk_id: "demo-chunk-1",
+      excerpt: "检索增强生成会先取得与问题有关的资料片段，再以这些片段作为回答依据。引用使读者能够回到资料核对结论。",
+      context_before: null,
+      context_after: "资料没有覆盖的问题，应明确说明依据不足。",
+      locator: { kind: "chunk", label: "匹配片段 1" },
+    },
+  ],
+  suggested_actions: [],
+};
+
 export const demoFixture: DemoFixture = Object.freeze({
   topic: Object.freeze({
     label: "示例主题",
     title: "RAG 基础",
   }),
-  localInstructionsUrl: "/README.md#fake-adapter-quick-start",
+  localInstructionsUrl: "/local-setup.html",
   capabilities,
+  exchange: Object.freeze({
+    question: "为什么 RAG 的回答还需要显示资料依据？",
+    response: demoResponse,
+  }),
 });
