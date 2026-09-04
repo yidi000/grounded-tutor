@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const desktop = devices["Desktop Chrome"];
+const testDatabasePath = join(tmpdir(), "grounded-tutor-task11.db");
+const testDatabaseUrl = `sqlite:///${testDatabasePath}`;
 
 export default defineConfig({
   testDir: "./tests",
@@ -14,7 +18,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "rm -f /private/tmp/grounded-tutor-task11.db && DATABASE_URL=sqlite:////private/tmp/grounded-tutor-task11.db .venv/bin/alembic -c apps/api/alembic.ini upgrade head && DATABASE_URL=sqlite:////private/tmp/grounded-tutor-task11.db EXTERNAL_MODE=fake .venv/bin/uvicorn grounded_tutor.main:app --app-dir apps/api/src --host 127.0.0.1 --port 8000",
+      command: `rm -f ${JSON.stringify(testDatabasePath)} && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} .venv/bin/alembic -c apps/api/alembic.ini upgrade head && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} EXTERNAL_MODE=fake .venv/bin/uvicorn grounded_tutor.main:app --app-dir apps/api/src --host 127.0.0.1 --port 8000`,
       cwd: "../..",
       url: "http://127.0.0.1:8000/api/health",
       reuseExistingServer: false,

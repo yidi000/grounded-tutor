@@ -28,7 +28,9 @@ export function ChatView({
         const citationById = new Map(
           response.citations.map((citation) => [citation.id, citation]),
         );
-        const orderedIds = response.answer_blocks.flatMap((block) => block.citation_ids);
+        const orderedIds = response.answer_blocks
+          .flatMap((block) => block.citation_ids)
+          .filter((citationId) => citationById.has(citationId));
         const citationNumbers = new Map(
           [...new Set(orderedIds)].map((citationId, index) => [citationId, index + 1]),
         );

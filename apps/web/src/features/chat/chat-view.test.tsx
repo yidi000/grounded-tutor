@@ -78,19 +78,32 @@ describe("ChatView", () => {
     renderChatApp({
       ...groundedResponse,
       answer_blocks: [
-        groundedResponse.answer_blocks[0],
         {
           id: "block-2",
           kind: "answer",
           text: "A second supported point.",
-          citation_ids: ["citation-1", "missing-citation"],
+          citation_ids: ["missing-citation", "citation-1"],
         },
       ],
     });
 
-    expect(screen.getAllByRole("button", { name: "引用 1：Week 1 notes" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "引用 1：Week 1 notes" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "引用 2：Week 1 notes" })).not.toBeInTheDocument();
     expect(screen.queryByText("missing-citation")).not.toBeInTheDocument();
     expect(warning).toHaveBeenCalledWith("Missing citation for answer block", "block-2", "missing-citation");
+  });
+
+  it("keeps focus on the Sources tab when dismissing citation detail", async () => {
+    const user = userEvent.setup();
+    renderChatApp(groundedResponse);
+    await user.click(screen.getByRole("button", { name: "引用 1：Week 1 notes" }));
+
+    const sourcesTab = screen.getByRole("button", { name: "全部资料" });
+    await user.click(sourcesTab);
+    await new Promise((resolve) => window.setTimeout(resolve, 1));
+
+    expect(screen.getByText("资料列表")).toBeVisible();
+    expect(sourcesTab).toHaveFocus();
   });
 
   it("restarts numbering and highlights only the owning block across messages", async () => {
@@ -148,7 +161,7 @@ describe("Composer", () => {
     await user.type(input, "What is a mean?");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(await screen.findByText("当前无法完成提问，请保留内容后重试。")).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent("当前无法完成提问，请保留内容后重试。");
     expect(input).toHaveValue("What is a mean?");
     expect(screen.queryByText("private provider details")).not.toBeInTheDocument();
   });

@@ -8,15 +8,16 @@ type ContextPanelProps = {
   sources?: ReactNode;
   citation?: Citation | null;
   onCloseCitation?: () => void;
+  onDismissCitation?: () => void;
   initialView?: "evidence" | "sources";
 };
 
-export function ContextPanel({ sources, citation, onCloseCitation, initialView = sources ? "sources" : "evidence" }: ContextPanelProps) {
+export function ContextPanel({ sources, citation, onCloseCitation, onDismissCitation, initialView = sources ? "sources" : "evidence" }: ContextPanelProps) {
   const [view, setView] = useState(initialView);
   const visibleView = citation ? "evidence" : view;
 
   function showSources() {
-    if (citation) onCloseCitation?.();
+    if (citation) onDismissCitation?.();
     setView("sources");
   }
 

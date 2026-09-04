@@ -54,7 +54,8 @@ function LocalNotebook() {
   function openWizard(options: Omit<typeof wizard, "open"> = {}) { rememberTrigger(); setWizard({ open: true, ...options }); }
   function closeWizard() { setWizard({ open: false }); window.setTimeout(() => lastTrigger.current?.focus(), 0); }
   function closeWorkspaceDialog() { setWorkspaceDialog(false); window.setTimeout(() => lastTrigger.current?.focus(), 0); }
-  function closeCitation() { setCitation(null); setSelectedBlockId(null); window.setTimeout(() => citationTrigger.current?.focus(), 0); }
+  function dismissCitation() { setCitation(null); setSelectedBlockId(null); }
+  function closeCitation() { dismissCitation(); window.setTimeout(() => citationTrigger.current?.focus(), 0); }
   function selectWorkspace(workspace: WorkspaceResponse) { chatGeneration.current += 1; setCurrentId(workspace.id); setExchanges([]); setConversationId(null); setCitation(null); setSelectedBlockId(null); }
   async function ask(question: string) {
     if (!current) return;
@@ -79,7 +80,7 @@ function LocalNotebook() {
       headerActions={capabilities.isSuccess ? <div className="top-actions"><button className="materials-button" type="button" onClick={() => current && openWizard()} disabled={!current}>资料 · {readyCount} 已就绪</button><button className="primary-button compact" type="button" onClick={() => current && openWizard()} disabled={!current}>上传你的资料 ＋</button></div> : undefined}
       topicRail={<TopicRail mode="local" workspaces={workspaces.data} currentId={currentId} onSelect={selectWorkspace} onCreate={capabilities.isSuccess ? () => { rememberTrigger(); setWorkspaceDialog(true); } : undefined} onRenamed={upsert} />}
       conversation={<ConversationSurface intro={intro} activity={exchanges.length ? <ChatView exchanges={exchanges} selectedBlockId={selectedBlockId} onAddSource={() => openWizard()} onRephrase={() => document.getElementById("study-question")?.focus()} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} /> : undefined} onFileDrop={current && capabilities.data ? (file) => openWizard({ file }) : undefined}><Composer key={current?.id ?? "no-workspace"} mode="local" ready={readyCount > 0} onAddSource={current ? () => openWizard() : undefined} onSubmit={ask} /></ConversationSurface>}
-      contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} sources={current ? <SourcePanel workspaceId={current.id} onAdd={() => openWizard()} onReview={(source) => openWizard({ source, intent: "review" })} onReprocess={(source) => openWizard({ source, intent: "reprocess" })} /> : undefined} />}
+      contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} onDismissCitation={dismissCitation} sources={current ? <SourcePanel workspaceId={current.id} onAdd={() => openWizard()} onReview={(source) => openWizard({ source, intent: "review" })} onReprocess={(source) => openWizard({ source, intent: "reprocess" })} /> : undefined} />}
     />
     {capabilities.data && <WorkspaceDialog open={workspaceDialog} capabilities={capabilities.data} onClose={closeWorkspaceDialog} onCreated={addWorkspace} />}
     {capabilities.data && current && <SourceWizard key={`${wizard.open}-${wizard.source?.id ?? "new"}-${wizard.file?.name ?? ""}`} workspaceId={current.id} capabilities={capabilities.data} open={wizard.open} initialFile={wizard.file} existingSource={wizard.source} intent={wizard.intent} onClose={closeWizard} onChanged={() => { void refresh(); }} />}
@@ -90,7 +91,8 @@ function DemoNotebook() {
   const [citation, setCitation] = useState<Citation | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const citationTrigger = useRef<HTMLButtonElement | null>(null);
-  function closeCitation() { setCitation(null); setSelectedBlockId(null); window.setTimeout(() => citationTrigger.current?.focus(), 0); }
+  function dismissCitation() { setCitation(null); setSelectedBlockId(null); }
+  function closeCitation() { dismissCitation(); window.setTimeout(() => citationTrigger.current?.focus(), 0); }
   const intro = <section className="intro-card demo-intro" aria-labelledby="intro-title"><div className="intro-meta"><span className="mode-label">公开只读示例</span><span>固定主题：RAG 基础</span></div><h1 id="intro-title">先看结论，也要看结论从哪里来</h1><p>这是证据笔记本的只读示例。带引用回答会在问答阶段进入中央区域，原文依据固定在右侧核对。</p><a className="primary-link" href={demoFixture.localInstructionsUrl}>在本地使用我的资料<span aria-hidden="true">↗</span></a></section>;
-  return <AppShell topicRail={<TopicRail mode="demo_read_only" />} conversation={<ConversationSurface intro={intro} activity={<ChatView exchanges={[demoFixture.exchange]} selectedBlockId={selectedBlockId} onAddSource={() => undefined} onRephrase={() => undefined} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} />}><Composer mode="demo_read_only" /></ConversationSurface>} contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} />} />;
+  return <AppShell topicRail={<TopicRail mode="demo_read_only" />} conversation={<ConversationSurface intro={intro} activity={<ChatView exchanges={[demoFixture.exchange]} selectedBlockId={selectedBlockId} onAddSource={() => undefined} onRephrase={() => undefined} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} />}><Composer mode="demo_read_only" /></ConversationSurface>} contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} onDismissCitation={dismissCitation} />} />;
 }

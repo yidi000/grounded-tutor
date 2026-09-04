@@ -21,9 +21,13 @@ function ChatHarness({ exchanges }: { exchanges: ChatExchange[] }) {
   const trigger = useRef<HTMLButtonElement | null>(null);
 
   function closeCitation() {
+    dismissCitation();
+    window.setTimeout(() => trigger.current?.focus(), 0);
+  }
+
+  function dismissCitation() {
     setCitation(null);
     setSelectedBlockId(null);
-    window.setTimeout(() => trigger.current?.focus(), 0);
   }
 
   return (
@@ -50,7 +54,12 @@ function ChatHarness({ exchanges }: { exchanges: ChatExchange[] }) {
         </ConversationSurface>
       }
       contextPanel={
-        <ContextPanel citation={citation} onCloseCitation={closeCitation} />
+        <ContextPanel
+          citation={citation}
+          onCloseCitation={closeCitation}
+          onDismissCitation={dismissCitation}
+          sources={<p>资料列表</p>}
+        />
       }
     />
   );

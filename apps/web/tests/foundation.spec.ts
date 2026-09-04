@@ -23,7 +23,7 @@ test("local paste review accept and keyboard-open cited ASK", async ({ page }, t
 
   await expectDesktopContract(page);
   await page.screenshot({
-    path: `/private/tmp/grounded-tutor-task11-${testInfo.project.name}.png`,
+    path: testInfo.outputPath(`grounded-tutor-task11-${testInfo.project.name}.png`),
     fullPage: false,
   });
 });
@@ -57,7 +57,7 @@ test("demo opens fixed citation and performs no write request", async ({ page },
 
   await expectDesktopContract(page);
   await page.screenshot({
-    path: `/private/tmp/grounded-tutor-task11-${testInfo.project.name}.png`,
+    path: testInfo.outputPath(`grounded-tutor-task11-${testInfo.project.name}.png`),
     fullPage: false,
   });
 });

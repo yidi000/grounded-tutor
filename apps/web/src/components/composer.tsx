@@ -55,7 +55,7 @@ export function Composer({ mode, onAddSource, ready = false, onSubmit }: Compose
           {sending ? "发送中" : "发送"}
         </button>
       </div>
-      {failed && <p className="composer-error">当前无法完成提问，请保留内容后重试。</p>}
+      {failed && <p className="composer-error" role="alert">当前无法完成提问，请保留内容后重试。</p>}
       <p>
         {isDemo
           ? "这是预先生成的回答；真实提问请使用本地版本。"
