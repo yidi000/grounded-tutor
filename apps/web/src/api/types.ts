@@ -241,6 +241,23 @@ export const SourceResponseSchema = z.object({
 export type SourceResponse = z.infer<typeof SourceResponseSchema>;
 export type SourceSummary = SourceResponse;
 
+export const PreviewItemSchema = z.object({
+  position: z.number().int(),
+  text: z.string(),
+  character_count: z.number().int(),
+  truncated: z.boolean(),
+  locator: SourceLocatorSchema.nullable(),
+});
+
+export const PreviewResponseSchema = z.object({
+  authority: z.literal("estimated"),
+  source_name: z.string(),
+  character_count: z.number().int(),
+  items: z.array(PreviewItemSchema),
+  warnings: z.array(z.object({ code: z.string() })),
+});
+export type PreviewResponse = z.infer<typeof PreviewResponseSchema>;
+
 export const ProcessedPreviewItemResponseSchema = z.object({
   position: z.number().int(),
   q: z.string(),

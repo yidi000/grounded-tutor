@@ -2,9 +2,10 @@ import type { AppMode } from "../config";
 
 type ComposerProps = {
   mode: AppMode;
+  onAddSource?: () => void;
 };
 
-export function Composer({ mode }: ComposerProps) {
+export function Composer({ mode, onAddSource }: ComposerProps) {
   const isDemo = mode === "demo_read_only";
 
   return (
@@ -13,6 +14,7 @@ export function Composer({ mode }: ComposerProps) {
         继续提问
       </label>
       <div className="composer">
+        {!isDemo && onAddSource && <button className="composer-add" type="button" onClick={onAddSource}>＋ 添加资料</button>}
         <textarea
           id="study-question"
           aria-label="向资料提问"

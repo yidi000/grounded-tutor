@@ -4,12 +4,14 @@ type AppShellProps = {
   topicRail: ReactNode;
   conversation: ReactNode;
   contextPanel: ReactNode;
+  headerActions?: ReactNode;
 };
 
 export function AppShell({
   topicRail,
   conversation,
   contextPanel,
+  headerActions,
 }: AppShellProps) {
   return (
     <div className="app-shell">
@@ -20,7 +22,7 @@ export function AppShell({
           </span>
           <span>Grounded Tutor</span>
         </a>
-        <p>把问题放在资料旁边，把依据留在视线里。</p>
+        {headerActions ?? <p>把问题放在资料旁边，把依据留在视线里。</p>}
       </header>
       {topicRail}
       {conversation}

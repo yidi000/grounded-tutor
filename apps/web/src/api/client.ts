@@ -1,8 +1,16 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 import {
   ApiErrorResponseSchema,
+  PreviewResponseSchema,
+  ProcessedPreviewResponseSchema,
+  SourceIngestionResponseSchema,
+  SourceResponseSchema,
+  WorkspaceResponseSchema,
   type PublicErrorCode,
+  type ChunkSettings,
+  type WorkspaceCreate,
+  type WorkspaceUpdate,
 } from "./types";
 
 export class ApiError extends Error {
@@ -41,3 +49,109 @@ export async function apiFetch<T>(
   }
   return schema.parse(await response.json());
 }
+
+const json = (body: unknown): RequestInit => ({
+  method: "POST",
+  body: JSON.stringify(body),
+});
+
+export const api = {
+  listWorkspaces: (signal?: AbortSignal) =>
+    apiFetch(z.array(WorkspaceResponseSchema), "/api/workspaces", { signal }),
+  createWorkspace: (payload: Pick<WorkspaceCreate, "title"> & Partial<Omit<WorkspaceCreate, "title">>) =>
+    apiFetch(WorkspaceResponseSchema, "/api/workspaces", json(payload)),
+  renameWorkspace: (id: string, payload: WorkspaceUpdate) =>
+    apiFetch(WorkspaceResponseSchema, `/api/workspaces/${id}`, {
+      ...json(payload),
+      method: "PATCH",
+    }),
+  listSources: (workspaceId: string, signal?: AbortSignal) =>
+    apiFetch(
+      z.array(SourceResponseSchema),
+      `/api/workspaces/${workspaceId}/sources`,
+      { signal },
+    ),
+  previewText: (
+    workspaceId: string,
+    sourceName: string,
+    text: string,
+    settings: ChunkSettings,
+  ) =>
+    apiFetch(
+      PreviewResponseSchema,
+      `/api/workspaces/${workspaceId}/source-previews/text`,
+      json({ source_name: sourceName, text, settings }),
+    ),
+  previewFile: (
+    workspaceId: string,
+    file: File,
+    settings: ChunkSettings,
+  ) => {
+    const body = new FormData();
+    body.set("file", file);
+    body.set("settings", JSON.stringify(settings));
+    return apiFetch(
+      PreviewResponseSchema,
+      `/api/workspaces/${workspaceId}/source-previews/file`,
+      { method: "POST", body },
+    );
+  },
+  ingestText: (
+    workspaceId: string,
+    sourceName: string,
+    text: string,
+    settings: ChunkSettings,
+    replaces?: string,
+  ) =>
+    apiFetch(
+      SourceIngestionResponseSchema,
+      replaces
+        ? `/api/workspaces/${workspaceId}/sources/${replaces}/reprocess/text`
+        : `/api/workspaces/${workspaceId}/sources/text`,
+      json({ source_name: sourceName, text, settings }),
+    ),
+  ingestFile: (
+    workspaceId: string,
+    file: File,
+    settings: ChunkSettings,
+    replaces?: string,
+  ) => {
+    const body = new FormData();
+    body.set("file", file);
+    body.set("settings", JSON.stringify(settings));
+    return apiFetch(
+      SourceIngestionResponseSchema,
+      replaces
+        ? `/api/workspaces/${workspaceId}/sources/${replaces}/reprocess/file`
+        : `/api/workspaces/${workspaceId}/sources/file`,
+      { method: "POST", body },
+    );
+  },
+  processedPreview: (workspaceId: string, sourceId: string) =>
+    apiFetch(
+      ProcessedPreviewResponseSchema,
+      `/api/workspaces/${workspaceId}/sources/${sourceId}/processed-preview`,
+    ),
+  acceptSource: (workspaceId: string, sourceId: string) =>
+    apiFetch(
+      SourceResponseSchema,
+      `/api/workspaces/${workspaceId}/sources/${sourceId}/accept`,
+      { method: "POST" },
+    ),
+  deleteSource: async (workspaceId: string, sourceId: string) => {
+    const response = await fetch(
+      `/api/workspaces/${workspaceId}/sources/${sourceId}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      let code: PublicErrorCode = "external_service_error";
+      try {
+        const parsed = ApiErrorResponseSchema.safeParse(await response.json());
+        if (parsed.success) code = parsed.data.detail.code;
+      } catch {
+        // Keep provider content private.
+      }
+      throw new ApiError(response.status, code);
+    }
+  },
+};
