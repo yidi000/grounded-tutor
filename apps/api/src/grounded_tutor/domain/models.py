@@ -137,3 +137,21 @@ class Message(Base):
     citations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class RequestRecord(Base):
+    __tablename__ = "request_records"
+    __table_args__ = (
+        CheckConstraint("state IN ('pending', 'completed')", name="ck_request_records_state"),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("workspaces.id"), primary_key=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )

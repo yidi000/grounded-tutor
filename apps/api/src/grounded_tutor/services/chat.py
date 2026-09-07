@@ -18,6 +18,7 @@ from grounded_tutor.repositories.chat import (
 )
 from grounded_tutor.repositories.sources import SourcePersistenceError, SourceRepository
 from grounded_tutor.services.grounding import ReadyChunk, ground_generated_answer
+from grounded_tutor.services.idempotency import request_hash
 
 RETRY_INSTRUCTION = (
     "Validation correction: return only unique nonblank answer blocks, and give every block "
@@ -68,15 +69,47 @@ class ChatService:
         conversation_id: UUID | None,
         idempotency_key: str,
     ) -> ChatResult:
-        persistence_failure = False
+        failed = False
         try:
             dataset_id = self._sources.get_workspace_dataset_id(workspace_id)
         except SourcePersistenceError:
-            persistence_failure = True
-        if persistence_failure:
+            failed = True
+        if failed:
             raise ChatPersistenceError()
         if dataset_id is None:
             raise ChatWorkspaceNotFoundError
+        saved = self._chats.claim_request(
+            workspace_id, idempotency_key, request_hash(message, conversation_id)
+        )
+        if saved is not None:
+            invalid = False
+            try:
+                return ChatResult(
+                    UUID(saved["conversation_id"]),
+                    UUID(saved["message_id"]),
+                    GroundedAnswer.model_validate(saved["answer"]),
+                )
+            except (KeyError, TypeError, ValueError):
+                invalid = True
+            if invalid:
+                raise ChatPersistenceError()
+        error = None
+        try:
+            return await self._ask(workspace_id, message, conversation_id, idempotency_key, dataset_id)
+        except BaseException as caught:  # noqa: BLE001 - release the claim on cancellation too.
+            error = caught
+        # Includes cancellation. Completed responses survive uncertain commit errors.
+        self._chats.release_request(workspace_id, idempotency_key)
+        raise error
+
+    async def _ask(
+        self,
+        workspace_id: UUID,
+        message: str,
+        conversation_id: UUID | None,
+        idempotency_key: str,
+        dataset_id: str,
+    ) -> ChatResult:
         if conversation_id is not None and not self._chats.conversation_belongs_to_workspace(
             workspace_id, conversation_id
         ):
@@ -132,17 +165,11 @@ class ChatService:
         if invalid_output:
             answer = await self._retry_generation(message, tuple(filtered_chunks), ready_chunks)
         else:
-            answer = ground_generated_answer(
-                generated, ready_chunks, allowed_kinds={"answer"}
-            )
+            answer = ground_generated_answer(generated, ready_chunks, allowed_kinds={"answer"})
             if not generated.blocks or len(answer.answer_blocks) != len(generated.blocks):
-                answer = await self._retry_generation(
-                    message, tuple(filtered_chunks), ready_chunks
-                )
+                answer = await self._retry_generation(message, tuple(filtered_chunks), ready_chunks)
 
-        return self._persist(
-            workspace_id, conversation_id, message, idempotency_key, answer
-        )
+        return self._persist(workspace_id, conversation_id, message, idempotency_key, answer)
 
     async def _retry_generation(
         self,
@@ -150,9 +177,7 @@ class ChatService:
         chunks: tuple[RetrievedChunk, ...],
         ready_chunks: dict[str, ReadyChunk],
     ) -> GroundedAnswer:
-        request = GenerationRequest(
-            "ASK", f"{message}\n\n{RETRY_INSTRUCTION}", chunks
-        )
+        request = GenerationRequest("ASK", f"{message}\n\n{RETRY_INSTRUCTION}", chunks)
         invalid_output = False
         external_failure = False
         try:
@@ -186,6 +211,4 @@ class ChatService:
 
 
 def _insufficient() -> GroundedAnswer:
-    return GroundedAnswer(
-        status="insufficient_material", answer_blocks=(), citations=()
-    )
+    return GroundedAnswer(status="insufficient_material", answer_blocks=(), citations=())

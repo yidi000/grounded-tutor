@@ -362,7 +362,7 @@ def test_chat_openapi_documents_actual_public_error_responses(client: TestClient
         "/api/workspaces/{workspace_id}/chat"
     ]["post"]
 
-    assert set(operation["responses"]) == {"200", "403", "404", "422", "500", "502"}
+    assert set(operation["responses"]) == {"200", "403", "404", "409", "422", "500", "502"}
     assert "ApiErrorResponse" in json.dumps(operation)
 
 
@@ -384,3 +384,35 @@ def test_history_keeps_legacy_text_and_redacts_broken_pairs(client, seeded_works
     response = client.get(url + "/history")
     assert response.status_code == 500
     assert "旧回答" not in response.text
+
+
+def test_chat_idempotency_replays_exact_response_and_reports_conflicts(client, seeded_workspace):
+    url = f"/api/workspaces/{seeded_workspace.id}/chat"
+    payload = {"message": "Question", "idempotency_key": "replay"}
+    first = client.post(url, json=payload)
+    assert first.status_code == 200
+    assert client.post(url, json=payload).json() == first.json()
+    changed = client.post(url, json={**payload, "message": "Changed"})
+    assert changed.status_code == 409
+    assert "idempotency_key_reused" in changed.text
+
+
+def test_chat_reports_pending_key_without_calling_providers(
+    client, seeded_workspace, api_session_factory, fake_fastgpt, fake_generation
+):
+    from grounded_tutor.domain.models import RequestRecord
+    from grounded_tutor.services.idempotency import request_hash
+
+    with api_session_factory() as session:
+        session.add(RequestRecord(
+            workspace_id=seeded_workspace.id, idempotency_key="pending",
+            request_hash=request_hash("Question", None), state="pending",
+        ))
+        session.commit()
+    response = client.post(f"/api/workspaces/{seeded_workspace.id}/chat", json={
+        "message": "Question", "idempotency_key": "pending",
+    })
+    assert response.status_code == 409
+    assert "idempotency_in_progress" in response.text
+    assert fake_fastgpt.search_calls == []
+    assert fake_generation.calls == []

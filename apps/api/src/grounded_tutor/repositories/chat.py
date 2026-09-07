@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import literal_column, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import insert, literal_column, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from grounded_tutor.domain.answers import GroundedAnswer, SimpleSuggestedAction
-from grounded_tutor.domain.models import Conversation, Message
+from grounded_tutor.domain.models import Conversation, Message, RequestRecord
 from grounded_tutor.domain.schemas import ChatHistoryExchange, ChatHistoryResponse, ChatResponse
+from grounded_tutor.services.idempotency import IdempotencyInProgress, IdempotencyKeyReused
 
 
 class ChatPersistenceError(RuntimeError):
@@ -32,6 +33,58 @@ class PersistedChat:
 class ChatRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def claim_request(self, workspace_id: UUID, key: str, request_hash: str) -> dict | None:
+        collision = False
+        failed = False
+        try:
+            self._session.execute(
+                insert(RequestRecord).values(
+                    workspace_id=workspace_id,
+                    idempotency_key=key,
+                    request_hash=request_hash,
+                    state="pending",
+                )
+            )
+            self._session.commit()
+        except IntegrityError:
+            self._rollback()
+            collision = True
+        except SQLAlchemyError:
+            self._rollback()
+            failed = True
+        if failed:
+            raise ChatPersistenceError()
+        if not collision:
+            return None
+        try:
+            record = self._session.get(RequestRecord, (workspace_id, key))
+        except SQLAlchemyError:
+            self._rollback()
+            failed = True
+        if failed or record is None:
+            raise ChatPersistenceError()
+        if record.request_hash != request_hash:
+            raise IdempotencyKeyReused()
+        if record.state != "completed":
+            raise IdempotencyInProgress()
+        if record.response_json is None:
+            raise ChatPersistenceError()
+        return record.response_json
+
+    def release_request(self, workspace_id: UUID, key: str) -> None:
+        failed = False
+        try:
+            self._session.rollback()
+            record = self._session.get(RequestRecord, (workspace_id, key))
+            if record is not None and record.state == "pending":
+                self._session.delete(record)
+                self._session.commit()
+        except SQLAlchemyError:
+            self._rollback()
+            failed = True
+        if failed:
+            raise ChatPersistenceError()
 
     def history(self, workspace_id: UUID) -> ChatHistoryResponse:
         failed = False
@@ -118,6 +171,14 @@ class ChatRepository:
             self._session.add_all((user_message, assistant_message))
             self._session.flush()
             result = PersistedChat(conversation.id, assistant_message.id)
+            record = self._session.get(RequestRecord, (workspace_id, idempotency_key))
+            if record is not None:
+                record.response_json = {
+                    "conversation_id": str(result.conversation_id),
+                    "message_id": str(result.message_id),
+                    "answer": answer.model_dump(mode="json"),
+                }
+                record.state = "completed"
             self._session.commit()
         except ChatConversationNotFoundError:
             self._rollback()

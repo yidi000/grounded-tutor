@@ -72,7 +72,7 @@ git commit -m "feat: enforce grounded citations"
 - Modify: `apps/api/src/grounded_tutor/services/chat.py`
 - Create: `apps/api/tests/services/test_idempotency.py`
 
-- [ ] **Step 1: Write the failing duplicate-request test**
+- [x] **Step 1: Write the failing duplicate-request test**
 
 ```python
 @pytest.mark.asyncio
@@ -83,28 +83,46 @@ async def test_same_key_returns_same_answer_without_second_generation(chat_servi
     assert fake_generation.call_count == 1
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_idempotency.py -q`
 
 Expected: FAIL because generation is called twice.
 
-- [ ] **Step 3: Implement idempotency records**
+- [x] **Step 3: Implement idempotency records**
 
 Add `RequestRecord(idempotency_key, workspace_id, request_hash, state, response_json, created_at)` with a unique composite index on `(workspace_id, idempotency_key)`. Hash canonical request JSON. A repeated key with the same hash returns the saved response; the same key with a different hash returns HTTP 409 `idempotency_key_reused`. Commit the assistant Message, citations, state change, and completed RequestRecord in one database transaction.
 
-- [ ] **Step 4: Verify concurrent and rollback behavior**
+- [x] **Step 4: Verify concurrent and rollback behavior**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_idempotency.py -q`
 
 Expected: same-key replay, conflicting payload, concurrent collision, and generation failure rollback tests all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
 git commit -m "feat: add idempotent chat writes"
 ```
+
+Implementation notes (2026-09-07): migration `0005_idempotency` follows
+`0004_message_content_blocks`. The composite primary key provides workspace/key
+uniqueness. The canonical hash includes ASK mode, message, and conversation ID.
+Claims commit before provider calls; completed records and messages commit together.
+Same-payload collisions return 409 `idempotency_in_progress` while running, then
+replay the persisted result; changed payloads return 409 `idempotency_key_reused`.
+Generation failures, cancellation, and uncommitted write failures release claims.
+A lost acknowledgement after a successful commit preserves the completed result.
+
+P0 recovery boundary: forced process termination or failure to release a claim can
+leave a pending record. It intentionally does not expire automatically. Before
+manual removal of that specific pending record, stop the original worker and
+confirm no completed response exists; then retry with the same payload/key.
+Automatic recovery needs fenced ownership/leases, not a timeout-only takeover.
+These guarantees apply to new request records; pre-migration messages are retained
+and their old request keys are not backfilled. Learning-state writes are added in
+Phase 3 and must join this same completion transaction.
 
 ### Task 3: Enforce Workspace isolation and document prompt-injection handling
 

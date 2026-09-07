@@ -20,12 +20,14 @@ from grounded_tutor.services.chat import (
     ChatWorkspaceNotFoundError,
     ExternalChatServiceError,
 )
+from grounded_tutor.services.idempotency import IdempotencyInProgress, IdempotencyKeyReused
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/chat", tags=["chat"])
 
 ERROR_RESPONSES = {
     **DEMO_WRITE_ERROR_RESPONSE,
     404: {"model": ApiErrorResponse, "description": "Workspace or conversation not found."},
+    409: {"model": ApiErrorResponse, "description": "Request key conflict or request in progress."},
     422: {"model": ApiErrorResponse, "description": "Chat input is invalid."},
     500: {"model": ApiErrorResponse, "description": "Local persistence failed."},
     502: {"model": ApiErrorResponse, "description": "External service failed."},
@@ -62,6 +64,10 @@ async def ask(
         api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
     except (ChatPersistenceError, SourcePersistenceError):
         api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+    except IdempotencyKeyReused:
+        api_error(status.HTTP_409_CONFLICT, "idempotency_key_reused")
+    except IdempotencyInProgress:
+        api_error(status.HTTP_409_CONFLICT, "idempotency_in_progress")
     except ExternalChatServiceError:
         api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
 
