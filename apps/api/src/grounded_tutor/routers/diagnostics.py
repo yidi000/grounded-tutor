@@ -3,8 +3,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from grounded_tutor.dependencies import get_diagnostic_service
+from grounded_tutor.dependencies import get_diagnostic_service, get_session, get_source_locks
 from grounded_tutor.domain.diagnostics import (
     DiagnosticAnswerRequest,
     DiagnosticAnswerResult,
@@ -12,13 +13,20 @@ from grounded_tutor.domain.diagnostics import (
     DiagnosticSummary,
     DiagnosticView,
 )
+from grounded_tutor.domain.models import Workspace
 from grounded_tutor.domain.schemas import ApiErrorResponse
-from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, learning_errors
+from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, api_error, learning_errors
+from grounded_tutor.services.diagnostic_invites import (
+    DiagnosticInvitation,
+    DiagnosticInviteService,
+    InvitePersistenceError,
+)
 from grounded_tutor.services.diagnostics import (
     DiagnosticConflictError,
     DiagnosticNotFoundError,
     DiagnosticService,
 )
+from grounded_tutor.services.source_locks import WorkspaceLockRegistry
 
 router = APIRouter(
     prefix="/api/workspaces/{workspace_id}/diagnostics",
@@ -36,6 +44,34 @@ public_errors = partial(
     (DiagnosticNotFoundError, "diagnostic_not_found"),
     (DiagnosticConflictError, "diagnostic_conflict"),
 )
+
+
+@router.get("/invitation", response_model=DiagnosticInvitation | None)
+def invitation(workspace_id: UUID, session: Annotated[Session, Depends(get_session)]):
+    with public_errors():
+        if session.get(Workspace, workspace_id) is None:
+            raise DiagnosticNotFoundError()
+        try:
+            return DiagnosticInviteService(session).current(workspace_id)
+        except InvitePersistenceError:
+            api_error(500, "persistence_error")
+
+
+@router.post("/invitation/{invitation_id}/dismiss", response_model=DiagnosticInvitation)
+async def dismiss_invitation(
+    workspace_id: UUID,
+    invitation_id: UUID,
+    session: Annotated[Session, Depends(get_session)],
+    locks: Annotated[WorkspaceLockRegistry, Depends(get_source_locks)],
+):
+    with public_errors():
+        async with locks.acquire(workspace_id):
+            try:
+                return DiagnosticInviteService(session).dismiss(workspace_id, invitation_id)
+            except ValueError:
+                raise DiagnosticConflictError() from None
+            except InvitePersistenceError:
+                api_error(500, "persistence_error")
 
 
 @router.post("", response_model=DiagnosticView)

@@ -11,6 +11,9 @@ function serve(read: (id: string) => Response | Promise<Response>) {
     const url = String(input);
     if (url.includes("capabilities")) return Response.json({ accepted_extensions: [".txt"], max_upload_bytes: 10000, settings: [], workspace_models: [], read_only_demo: false });
     if (url === "/api/workspaces") return Response.json(ids.map((id, i) => ({ id, title: `Topic ${i}`, source_count: 1, ready_source_count: 1, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-07T00:00:00Z", updated_at: "2026-09-07T00:00:00Z" })));
+    if (url.endsWith("/learning/activity")) return Response.json({ snapshot: { active_mode: "ASK", active_concept_id: null, checkpoint: null, suspended_activity: null }, kind: "idle", checkpoint: null, resume_action: null, concept: null, plan: null, diagnostic: null, lesson: null, check: null });
+    if (url.endsWith("/diagnostics/invitation")) return Response.json(null);
+    if (url.endsWith("/plans")) return Response.json({ plans: [] });
     if (url.endsWith("/sources")) return Response.json([]);
     if (url.endsWith("/chat/history")) return read(url.split("/")[3]);
     throw new Error(`Unexpected request ${url}`);

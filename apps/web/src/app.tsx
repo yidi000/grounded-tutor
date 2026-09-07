@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient, useIsMutating } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api, apiFetch } from "./api/client";
@@ -14,6 +14,8 @@ import { SourceWizard } from "./features/sources/source-wizard";
 import { TopicRail } from "./features/workspaces/topic-rail";
 import { WorkspaceDialog } from "./features/workspaces/workspace-dialog";
 import { ChatView } from "./features/chat/chat-view";
+
+import { LearningWorkspace } from "./features/learning/learning-workspace";
 
 type AppProps = { mode: AppMode };
 
@@ -44,6 +46,8 @@ function LocalNotebook() {
   const lastTrigger = useRef<HTMLElement | null>(null);
   const citationTrigger = useRef<HTMLButtonElement | null>(null);
   const chatGeneration = useRef(0);
+  const learningRetries = useRef(new Map<string, string>());
+  const learningPending = useIsMutating({ mutationKey: ["learning-write", currentId] }) > 0;
 
   useEffect(() => {
     if (workspaces.data?.length && !workspaces.data.some((item) => item.id === currentId)) setCurrentId(workspaces.data[0].id);
@@ -70,7 +74,7 @@ function LocalNotebook() {
   function closeCitation() { dismissCitation(); window.setTimeout(() => citationTrigger.current?.focus(), 0); }
   function selectWorkspace(workspace: WorkspaceResponse) { if (workspace.id === currentId) return; chatGeneration.current += 1; setCurrentId(workspace.id); setCitation(null); setSelectedBlockId(null); }
   async function ask(question: string) {
-    if (!current || !chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(current.id)) return;
+    if (!current || !chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(current.id) || learningPending) return;
     const workspaceId = current.id;
     const previous = retryRequests.current[workspaceId];
     const payload = previous?.message === question ? previous : { conversation_id: conversationId, message: question, idempotency_key: crypto.randomUUID() };
@@ -81,6 +85,7 @@ function LocalNotebook() {
     try {
       const response = await api.ask(workspaceId, payload);
       delete retryRequests.current[workspaceId];
+      await queryClient.invalidateQueries({ queryKey: ["learning", workspaceId] });
       await queryClient.cancelQueries({ queryKey: ["chat-history", workspaceId] });
       queryClient.setQueryData<ChatHistoryResponse>(["chat-history", workspaceId], (history) => history?.exchanges.some((item) => item.response.message_id === response.message_id) ? history : ({ exchanges: [...(history?.exchanges ?? []), { question, response }] }));
       // Re-read persisted history after a workspace switch, including older turns.
@@ -102,7 +107,7 @@ function LocalNotebook() {
     <AppShell
       headerActions={capabilities.isSuccess ? <div className="top-actions"><button className="materials-button" type="button" onClick={() => current && openWizard()} disabled={!current}>资料 · {readyCount} 已就绪</button><button className="primary-button compact" type="button" onClick={() => current && openWizard()} disabled={!current}>上传你的资料 ＋</button></div> : undefined}
       topicRail={<TopicRail mode="local" workspaces={workspaces.data} currentId={currentId} onSelect={selectWorkspace} onCreate={capabilities.isSuccess ? () => { rememberTrigger(); setWorkspaceDialog(true); } : undefined} onRenamed={upsert} />}
-      conversation={<ConversationSurface intro={intro} activity={<>{current && chatHistory.isFetching && <p role="status">正在读取历史对话…</p>}{current && chatHistory.isError && <div className="insufficient-state" role="alert"><p>暂时无法读取历史对话</p><button type="button" onClick={() => void chatHistory.refetch()}>重新加载对话</button></div>}{exchanges.length ? <ChatView exchanges={exchanges} selectedBlockId={selectedBlockId} onAddSource={() => openWizard()} onRephrase={() => document.getElementById("study-question")?.focus()} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} /> : null}</>} onFileDrop={current && capabilities.data ? (file) => openWizard({ file }) : undefined}><Composer key={current?.id ?? "no-workspace"} mode="local" draft={drafts[currentId ?? ""] ?? ""} onDraftChange={(draft) => setDrafts((items) => ({ ...items, [currentId ?? ""]: draft }))} failed={failedAsks.includes(currentId ?? "")} ready={readyCount > 0} blocked={!chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(currentId ?? "")} onAddSource={current ? () => openWizard() : undefined} onSubmit={ask} /></ConversationSurface>}
+      conversation={<ConversationSurface intro={intro} activity={<>{current && chatHistory.isFetching && <p role="status">正在读取历史对话…</p>}{current && chatHistory.isError && <div className="insufficient-state" role="alert"><p>暂时无法读取历史对话</p><button type="button" onClick={() => void chatHistory.refetch()}>重新加载对话</button></div>}{exchanges.length ? <ChatView exchanges={exchanges} selectedBlockId={selectedBlockId} onAddSource={() => openWizard()} onRephrase={() => document.getElementById("study-question")?.focus()} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} /> : null}{current && <LearningWorkspace key={current.id} workspaceId={current.id} title={current.title} chatPending={pendingAsks.includes(current.id)} retries={learningRetries.current} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} />}</>} onFileDrop={current && capabilities.data ? (file) => openWizard({ file }) : undefined}><Composer key={current?.id ?? "no-workspace"} mode="local" draft={drafts[currentId ?? ""] ?? ""} onDraftChange={(draft) => setDrafts((items) => ({ ...items, [currentId ?? ""]: draft }))} failed={failedAsks.includes(currentId ?? "")} ready={readyCount > 0} blocked={learningPending || !chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(currentId ?? "")} onAddSource={current ? () => openWizard() : undefined} onSubmit={ask} /></ConversationSurface>}
       contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} onDismissCitation={dismissCitation} sources={current ? <SourcePanel workspaceId={current.id} onAdd={() => openWizard()} onReview={(source) => openWizard({ source, intent: "review" })} onReprocess={(source) => openWizard({ source, intent: "reprocess" })} /> : undefined} />}
     />
     {capabilities.data && <WorkspaceDialog open={workspaceDialog} capabilities={capabilities.data} onClose={closeWorkspaceDialog} onCreated={addWorkspace} />}

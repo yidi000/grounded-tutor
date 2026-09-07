@@ -1,0 +1,8 @@
+{"id":"LR-01","journey":"invite_consent"}
+{"id":"LR-02","journey":"dismiss_cooldown"}
+{"id":"LR-03","journey":"diagnostic_skip"}
+{"id":"LR-04","journey":"bounded_plan"}
+{"id":"LR-05","journey":"check_detour"}
+{"id":"LR-06","journey":"failed_check"}
+{"id":"LR-07","journey":"passed_check"}
+{"id":"LR-08","journey":"reload"}

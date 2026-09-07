@@ -2,10 +2,12 @@
 
 from uuid import UUID
 
+from sqlalchemy import literal_column, select
+
 from grounded_tutor.adapters.generation import InvalidGenerationOutput
 from grounded_tutor.domain.answers import GeneratedAnswer, GeneratedBlock
-from grounded_tutor.domain.models import Assessment, Attempt, ImmediateCheck, Lesson
-from grounded_tutor.domain.teaching import CheckResult, CheckView, GeneratedCheck
+from grounded_tutor.domain.models import Assessment, Attempt, Concept, ImmediateCheck, Lesson
+from grounded_tutor.domain.teaching import CheckFeedback, CheckResult, CheckView, GeneratedCheck
 from grounded_tutor.services.assessment_scoring import is_correct, normalize
 from grounded_tutor.services.grounding import ground_generated_answer
 from grounded_tutor.services.learning_context import (
@@ -51,6 +53,30 @@ class CheckService:
             prompt=assessment.prompt,
             options=assessment.options,
             citations=assessment.citations,
+        )
+
+    def latest_feedback(self, workspace_id):
+        # P0 SQLite insertion order also disambiguates submissions in one second.
+        link = self.session.scalar(
+            select(ImmediateCheck)
+            .join(Attempt, ImmediateCheck.attempt_id == Attempt.id)
+            .where(ImmediateCheck.workspace_id == workspace_id)
+            .order_by(literal_column("attempts.rowid").desc())
+            .limit(1)
+        )
+        if link is None:
+            return None
+        assessment, _ = self._record(workspace_id, link.assessment_id)
+        attempt = self.session.get(Attempt, link.attempt_id)
+        concept = self.session.get(Concept, assessment.concept_id)
+        skipped = attempt.status == "not_assessed"
+        return CheckFeedback(
+            attempt_id=attempt.id,
+            concept_id=concept.id,
+            concept_title=concept.title,
+            result="not_assessed" if skipped else attempt.result,
+            explanation_blocks=() if skipped else assessment.feedback_blocks,
+            citations=() if skipped else assessment.citations,
         )
 
     async def start(self, workspace_id, concept_id, request):

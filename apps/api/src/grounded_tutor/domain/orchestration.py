@@ -7,7 +7,7 @@ from grounded_tutor.domain.answers import ResumeActivityAction
 from grounded_tutor.domain.diagnostics import Contract, DiagnosticView, Key
 from grounded_tutor.domain.learning import ActivitySnapshot, ConceptStatus
 from grounded_tutor.domain.plans import PlanView
-from grounded_tutor.domain.teaching import CheckView, LessonView
+from grounded_tutor.domain.teaching import CheckFeedback, CheckView, LessonView
 
 
 class ActivityCommand(Contract):
@@ -33,3 +33,4 @@ class ActivityView(Contract):
     diagnostic: DiagnosticView | None = None
     lesson: LessonView | None = None
     check: CheckView | None = None
+    check_feedback: CheckFeedback | None = None

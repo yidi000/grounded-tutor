@@ -18,7 +18,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `rm -f ${JSON.stringify(testDatabasePath)} && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} .venv/bin/alembic -c apps/api/alembic.ini upgrade head && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} EXTERNAL_MODE=fake .venv/bin/uvicorn grounded_tutor.main:app --app-dir apps/api/src --host 127.0.0.1 --port 8000`,
+      command: `rm -f ${JSON.stringify(testDatabasePath)} && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} .venv/bin/alembic -c apps/api/alembic.ini upgrade head && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} EXTERNAL_MODE=fake .venv/bin/uvicorn e2e_app:app --app-dir apps/api/tests --host 127.0.0.1 --port 8000`,
       cwd: "../..",
       url: "http://127.0.0.1:8000/api/health",
       reuseExistingServer: false,

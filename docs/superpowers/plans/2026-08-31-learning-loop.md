@@ -375,7 +375,7 @@ Implementation notes: see `docs/activity-resume.md`. Includes atomic ASK detours
 - Create: `evals/cases/learning.jsonl`
 - Modify: `Makefile`
 
-- [ ] **Step 1: Write the failing browser journey**
+- [x] **Step 1: Write the failing browser journey**
 
 ```ts
 test("free chat can enter and resume the learning loop", async ({ page }) => {
@@ -396,25 +396,28 @@ test("free chat can enter and resume the learning loop", async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Run the browser test to verify failure**
+- [x] **Step 2: Run the browser test to verify failure**
 
 Run: `npm --prefix apps/web exec playwright test tests/learning-loop.spec.ts`
 
 Expected: FAIL because the diagnostic invitation is absent.
 
-- [ ] **Step 3: Implement learning UI and case data**
+- [x] **Step 3: Implement learning UI and case data**
 
 The invitation remains a card inside chat, not a modal. Diagnostic UI always offers skip and exit. The plan shows 3–5 concepts, evidence availability, and statuses. Lesson UI exposes the three depth controls and ASK composer. Check UI explains answers with citations. Resume Card names the suspended activity. Add evaluation IDs `LR-01`–`LR-08` for invite consent, invite dismissal cooldown, diagnostic skip, bounded plan, check detour/resume, failed check review, passed check advance, and page reload recovery.
 
-- [ ] **Step 4: Run the complete learning gate**
+- [x] **Step 4: Run the complete learning gate**
 
 Run: `make verify-learning`
 
 Expected: all backend/frontend tests pass, all 48 evaluation cases execute, and both Playwright journeys pass with fake adapters.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web evals Makefile
 git commit -m "feat: complete diagnostic learning loop"
 ```
+
+
+Implementation notes (2026-09-07): see `docs/learning-ui.md`. Desktop UI uses the existing notebook and citation panel. Added invitation read/dismiss routes and persisted latest-check feedback recovery without a migration. A single independent review identified feedback loss during a topic switch; fixed with activity reads and covered by a delayed-response browser journey. Learning evaluations LR-01–LR-08 execute real services in isolated SQLite. Live FastGPT learning generation contracts remain unverified; completion here refers to the local/fake-provider gate, not cloud learning acceptance.

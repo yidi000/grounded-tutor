@@ -28,3 +28,8 @@ verify-trust:
 	.venv/bin/python scripts/summarize_evaluation.py evals/reports/local.json evals/reports/summary.json
 	git diff --check
 	git diff --cached --check
+
+.PHONY: verify-learning
+verify-learning: verify-trust
+	.venv/bin/python -m grounded_tutor.evaluation.learning --cases evals/cases/learning.jsonl --output evals/reports/learning-local.json
+	npm --prefix apps/web exec playwright test -- --config=apps/web/playwright.config.ts

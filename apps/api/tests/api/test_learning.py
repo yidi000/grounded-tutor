@@ -237,3 +237,22 @@ def test_demo_blocks_pause_and_resume(demo_client):
     url = f"/api/workspaces/{uuid4()}/learning/activity"
     for action in ("pause", "resume"):
         assert demo_client.post(url + "/" + action, json={}).status_code == 403
+
+
+def test_activity_restores_latest_check_feedback_after_reload(client, teaching_api):
+    url, concepts = teaching_api
+    client.post(f"{url}/concepts/{concepts[0]}/lessons", json={"idempotency_key": "lesson"})
+    checked = client.post(
+        f"{url}/concepts/{concepts[0]}/checks", json={"idempotency_key": "check"}
+    ).json()
+    before = client.get(f"{url}/activity").json()
+    assert before.get("check_feedback") is None
+    result = client.post(
+        f"{url}/checks/{checked['assessment_id']}/answers",
+        json={"response": "sum", "idempotency_key": "answer"},
+    ).json()
+    restored = client.get(f"{url}/activity").json()["check_feedback"]
+    assert restored["result"] == "understood"
+    assert restored["explanation_blocks"] == result["explanation_blocks"]
+    assert restored["citations"] == result["citations"]
+    assert "answer_key" not in str(restored)

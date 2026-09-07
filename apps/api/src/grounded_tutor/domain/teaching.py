@@ -83,3 +83,12 @@ class CheckResult(Contract):
     active_concept_id: UUID | None
     explanation_blocks: tuple[GroundedContentBlock, ...] = ()
     citations: tuple[Citation, ...] = ()
+
+
+class CheckFeedback(Contract):
+    attempt_id: UUID
+    concept_id: UUID
+    concept_title: str
+    result: Result
+    explanation_blocks: tuple[GroundedContentBlock, ...] = ()
+    citations: tuple[Citation, ...] = ()

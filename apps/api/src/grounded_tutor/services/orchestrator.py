@@ -74,7 +74,9 @@ class Orchestrator:
 
     def view(self, workspace_id, *, require_ready=False):
         try:
-            return self._view(workspace_id, require_ready=require_ready)
+            return self._view(workspace_id, require_ready=require_ready).model_copy(
+                update={"check_feedback": self.checks.latest_feedback(workspace_id)}
+            )
         except (DiagnosticNotFoundError, PlanNotFoundError, ValueError):
             raise LearningConflictError() from None
 
