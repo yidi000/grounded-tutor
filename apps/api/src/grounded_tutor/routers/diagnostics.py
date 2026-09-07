@@ -1,11 +1,9 @@
-from contextlib import contextmanager
+from functools import partial
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.exc import SQLAlchemyError
 
-from grounded_tutor.adapters.fastgpt import ExternalServiceError
 from grounded_tutor.dependencies import get_diagnostic_service
 from grounded_tutor.domain.diagnostics import (
     DiagnosticAnswerRequest,
@@ -15,16 +13,12 @@ from grounded_tutor.domain.diagnostics import (
     DiagnosticView,
 )
 from grounded_tutor.domain.schemas import ApiErrorResponse
-from grounded_tutor.repositories.chat import ChatPersistenceError
-from grounded_tutor.repositories.sources import SourcePersistenceError
-from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, api_error
+from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, learning_errors
 from grounded_tutor.services.diagnostics import (
     DiagnosticConflictError,
     DiagnosticNotFoundError,
     DiagnosticService,
 )
-from grounded_tutor.services.idempotency import IdempotencyInProgress, IdempotencyKeyReused
-from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError
 
 router = APIRouter(
     prefix="/api/workspaces/{workspace_id}/diagnostics",
@@ -37,24 +31,11 @@ router = APIRouter(
 Service = Annotated[DiagnosticService, Depends(get_diagnostic_service)]
 
 
-@contextmanager
-def public_errors():
-    try:
-        yield
-    except DiagnosticNotFoundError:
-        api_error(404, "diagnostic_not_found")
-    except DiagnosticConflictError:
-        api_error(409, "diagnostic_conflict")
-    except IdempotencyKeyReused:
-        api_error(409, "idempotency_key_reused")
-    except IdempotencyInProgress:
-        api_error(409, "idempotency_in_progress")
-    except WorkspaceIngestionBusyError:
-        api_error(409, "workspace_ingestion_busy")
-    except (ChatPersistenceError, SourcePersistenceError, SQLAlchemyError):
-        api_error(500, "persistence_error")
-    except ExternalServiceError:
-        api_error(502, "external_service_error")
+public_errors = partial(
+    learning_errors,
+    (DiagnosticNotFoundError, "diagnostic_not_found"),
+    (DiagnosticConflictError, "diagnostic_conflict"),
+)
 
 
 @router.post("", response_model=DiagnosticView)

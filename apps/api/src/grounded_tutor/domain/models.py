@@ -222,6 +222,7 @@ class LearningPlan(Base):
 class Concept(Base):
     __tablename__ = "concepts"
     __table_args__ = (
+        CheckConstraint("check_kind IN ('single_choice','structured_short')", name="ck_concept_check_kind"),
         ForeignKeyConstraint(
             ["plan_id", "workspace_id"],
             ["learning_plans.id", "learning_plans.workspace_id"],
@@ -245,6 +246,7 @@ class Concept(Base):
     order: Mapped[int] = mapped_column(nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     objective: Mapped[str] = mapped_column(String, nullable=False)
+    check_kind: Mapped[str] = mapped_column(String(32), default="single_choice", server_default="single_choice")
     status: Mapped[str] = mapped_column(
         String(32), default="not_started", server_default="not_started"
     )
@@ -395,3 +397,14 @@ class DiagnosticQuestion(Base):
     order: Mapped[int] = mapped_column()
     concept_label: Mapped[str] = mapped_column(String(120))
     attempt_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+
+
+class PlanOrigin(Base):
+    __tablename__ = "plan_origins"
+    __table_args__ = (
+        ForeignKeyConstraint(["plan_id", "workspace_id"], ["learning_plans.id", "learning_plans.workspace_id"]),
+        ForeignKeyConstraint(["diagnostic_id", "workspace_id"], ["diagnostics.id", "diagnostics.workspace_id"]),
+    )
+    plan_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    diagnostic_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)

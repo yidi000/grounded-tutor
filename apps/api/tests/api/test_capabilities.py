@@ -24,6 +24,8 @@ EXPECTED_PUBLIC_ERROR_CODES = {
     "invalid_chunk_settings",
     "invalid_source_transition",
     "persistence_error",
+    "plan_conflict",
+    "plan_not_found",
     "processed_preview_unavailable",
     "request_body_too_large",
     "source_not_found",

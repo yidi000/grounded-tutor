@@ -1,12 +1,9 @@
 """Consent-gated, grounded diagnostic lifecycle for the single-worker P0."""
 
-import hashlib
-import json
 import unicodedata
 from uuid import uuid5
 
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 
 from grounded_tutor.adapters.fastgpt import SearchRequest
 from grounded_tutor.adapters.generation import InvalidGenerationOutput
@@ -26,12 +23,11 @@ from grounded_tutor.domain.models import (
     Diagnostic,
     DiagnosticQuestion,
     LearnerProfile,
-    RequestRecord,
     Workspace,
 )
-from grounded_tutor.repositories.chat import ChatPersistenceError, ChatRepository
 from grounded_tutor.repositories.sources import SourceRepository
 from grounded_tutor.services.grounding import ReadyChunk, ground_generated_answer
+from grounded_tutor.services.learning_requests import LearningRequests
 
 
 class DiagnosticNotFoundError(RuntimeError):
@@ -53,35 +49,7 @@ class DiagnosticService:
         self.generation = generation
         self.locks = locks
         self.sources = SourceRepository(session)
-        self.requests = ChatRepository(session)
-
-    async def _write(self, workspace_id, operation, payload, result_type, action):
-        async with self.locks.acquire(workspace_id):
-            if self.session.get(Workspace, workspace_id) is None:
-                raise DiagnosticNotFoundError()
-            key = (
-                "diagnostic:"
-                + hashlib.sha256((operation + payload.idempotency_key).encode()).hexdigest()
-            )
-            digest = hashlib.sha256(
-                json.dumps(payload.model_dump(mode="json"), sort_keys=True).encode()
-            ).hexdigest()
-            replay = self.requests.claim_request(workspace_id, key, digest)
-            if replay is not None:
-                return result_type.model_validate(replay)
-            try:
-                result = await action()
-                record = self.session.get(RequestRecord, (workspace_id, key))
-                record.state = "completed"
-                record.response_json = result.model_dump(mode="json")
-                self.session.commit()
-                return result
-            except BaseException as error:
-                # Completed records survive a lost commit acknowledgement.
-                self.requests.release_request(workspace_id, key)
-                if isinstance(error, SQLAlchemyError):
-                    raise ChatPersistenceError() from None
-                raise
+        self.writes = LearningRequests(session, locks, "diagnostic", DiagnosticNotFoundError)
 
     async def start(self, workspace_id, request):
         async def create():
@@ -227,7 +195,7 @@ class DiagnosticService:
             self.session.flush()
             return self.get(workspace_id, diagnostic_id)
 
-        return await self._write(workspace_id, "start:", request, DiagnosticView, create)
+        return await self.writes.run(workspace_id, "start:", request, DiagnosticView, create)
 
     def _record(self, workspace_id, diagnostic_id):
         diagnostic = self.session.get(Diagnostic, diagnostic_id)
@@ -323,7 +291,7 @@ class DiagnosticService:
                 citations=() if request.skip else assessment.citations,
             )
 
-        return await self._write(
+        return await self.writes.run(
             workspace_id, f"answer:{diagnostic_id}:", request, DiagnosticAnswerResult, record
         )
 

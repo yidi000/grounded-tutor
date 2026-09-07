@@ -193,7 +193,7 @@ Implementation notes: see `docs/micro-diagnostics.md`. Local API/service and ada
 - Create: `apps/api/src/grounded_tutor/routers/plans.py`
 - Create: `apps/api/tests/services/test_plans.py`
 
-- [ ] **Step 1: Write the failing plan constraints test**
+- [x] **Step 1: Write the failing plan constraints test**
 
 ```python
 @pytest.mark.asyncio
@@ -204,13 +204,13 @@ async def test_plan_contains_three_to_five_grounded_concepts(plan_service, compl
     assert all(concept.objective and concept.evidence_refs for concept in plan.concepts)
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_plans.py -q`
 
 Expected: FAIL because Plan Service does not exist.
 
-- [ ] **Step 3: Implement plan creation and safe changes**
+- [x] **Step 3: Implement plan creation and safe changes**
 
 Extend `GenerationPort` with a separate plan response rather than forcing concepts into answer blocks:
 
@@ -240,18 +240,20 @@ class GenerationPort(Protocol):
 
 Build 3–5 concepts from confirmed goal, diagnostic results, and READY source evidence. Validate every generated chunk ID before persistence. Every concept has title, objective, order, evidence refs, and an immediate-check type. Allow skip without deleting completed state. Do not expose a reorder endpoint in P0. Require a `confirm_rebuild=true` request for full regeneration; preserve the old plan as `superseded` rather than overwriting it.
 
-- [ ] **Step 4: Verify constraints and history**
+- [x] **Step 4: Verify constraints and history**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_plans.py -q`
 
 Expected: bounds, evidence, skip, absence of a reorder route, completed preservation, rejected unconfirmed rebuild, and superseded history tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
 git commit -m "feat: add grounded learning plans"
 ```
+
+Implementation notes: see `docs/learning-plans.md`. Includes persisted diagnostic provenance, check kinds, scoped skip/rebuild/history APIs, and atomic replay shared with diagnostics. Desktop UI remains Task 7; the deployed FastGPT concepts contract is not yet live-verified.
 
 ### Task 5: Add grounded lessons and immediate checks
 

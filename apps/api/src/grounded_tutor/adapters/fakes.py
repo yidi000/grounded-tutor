@@ -206,6 +206,8 @@ class FakeGeneration(GenerationPort):
         self.calls: list[GenerationRequest] = []
         self.diagnostic_responses = []
         self.diagnostic_calls = []
+        self.plan_responses = []
+        self.plan_calls = []
 
     async def generate_content(self, request: GenerationRequest) -> GeneratedAnswer:
         self.calls.append(request)
@@ -237,4 +239,14 @@ class FakeGeneration(GenerationPort):
                 raise result
             return result
         # No fabricated educational questions when a test has not supplied evidence.
+        raise InvalidGenerationOutput()
+
+    async def generate_plan(self, goal, diagnostic_summary, chunks):
+        from grounded_tutor.adapters.generation import InvalidGenerationOutput
+        self.plan_calls.append((goal, diagnostic_summary, chunks))
+        if self.plan_responses:
+            result = self.plan_responses.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
         raise InvalidGenerationOutput()
