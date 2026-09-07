@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, Uuid, func
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy.schema import UniqueConstraint
+from sqlalchemy.schema import ForeignKeyConstraint, UniqueConstraint
 
 
 class SourceType(str, Enum):
@@ -192,4 +192,172 @@ class BadCase(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp(),
         onupdate=func.current_timestamp(),
+    )
+
+
+class LearningPlan(Base):
+    __tablename__ = "learning_plans"
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id", name="uq_learning_plans_id_workspace"),
+        CheckConstraint(
+            "status IN ('not_started','active','completed','superseded')",
+            name="ck_plan_status",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    goal: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default="not_started", server_default="not_started"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Concept(Base):
+    __tablename__ = "concepts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["plan_id", "workspace_id"],
+            ["learning_plans.id", "learning_plans.workspace_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("id", "workspace_id", name="uq_concepts_id_workspace"),
+        UniqueConstraint("plan_id", "order", name="uq_concepts_plan_order"),
+        CheckConstraint('"order" > 0', name="ck_concept_order_positive"),
+        CheckConstraint(
+            "status IN ('not_started','active','completed','needs_review','not_assessed')",
+            name="ck_concept_status",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    plan_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), nullable=False, index=True
+    )
+    order: Mapped[int] = mapped_column(nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    objective: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default="not_started", server_default="not_started"
+    )
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class ActivityState(Base):
+    __tablename__ = "activity_states"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["active_concept_id", "workspace_id"],
+            ["concepts.id", "concepts.workspace_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "active_mode IN ('ASK','PLAN','LEARN','CHECK')", name="ck_activity_mode"
+        ),
+        CheckConstraint(
+            "suspended_activity IS NULL OR active_mode = 'ASK'",
+            name="ck_activity_suspended_mode",
+        ),
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), primary_key=True
+    )
+    active_mode: Mapped[str] = mapped_column(
+        String(16), default="ASK", server_default="ASK"
+    )
+    active_concept_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True
+    )
+    suspended_activity: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    return_checkpoint: Mapped[str | None] = mapped_column(String, nullable=True)
+    nudge_cooldown_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class LearnerProfile(Base):
+    __tablename__ = "learner_profiles"
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), primary_key=True
+    )
+    inferred_fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    confirmed_fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class Assessment(Base):
+    __tablename__ = "assessments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["concept_id", "workspace_id"],
+            ["concepts.id", "concepts.workspace_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "kind IN ('single_choice','structured_short')", name="ck_assessment_kind"
+        ),
+        CheckConstraint(
+            "purpose IN ('diagnostic','immediate_check')", name="ck_assessment_purpose"
+        ),
+        CheckConstraint(
+            "purpose != 'immediate_check' OR concept_id IS NOT NULL",
+            name="ck_check_has_concept",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    concept_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    purpose: Mapped[str] = mapped_column(
+        String(32), default="diagnostic", server_default="diagnostic"
+    )
+    prompt: Mapped[str] = mapped_column(String, nullable=False)
+    options: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Server-only; future public question schemas must explicitly omit this field.
+    answer_key: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    evidence_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    feedback_blocks: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class Attempt(Base):
+    __tablename__ = "attempts"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('completed','not_assessed')", name="ck_attempt_status"
+        ),
+        CheckConstraint(
+            "(status = 'not_assessed' AND result IS NULL AND response IS NULL) OR (status = 'completed' AND result IS NOT NULL AND result IN ('understood','needs_review') AND response IS NOT NULL)",
+            name="ck_attempt_result",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), primary_key=True, default=uuid4
+    )
+    assessment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assessments.id", ondelete="RESTRICT"), index=True
+    )
+    response: Mapped[str | None] = mapped_column(String, nullable=True)
+    result: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

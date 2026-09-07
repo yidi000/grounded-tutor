@@ -20,7 +20,7 @@
 - Create: `apps/api/src/grounded_tutor/domain/learning.py`
 - Create: `apps/api/tests/domain/test_learning_state.py`
 
-- [ ] **Step 1: Write the failing state test**
+- [x] **Step 1: Write the failing state test**
 
 ```python
 def test_activity_can_suspend_check_for_ask() -> None:
@@ -31,23 +31,25 @@ def test_activity_can_suspend_check_for_ask() -> None:
     assert suspended.suspended_activity.checkpoint == "question-2"
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/domain/test_learning_state.py -q`
 
 Expected: FAIL because `ActivitySnapshot` does not exist.
 
-- [ ] **Step 3: Add types and tables**
+- [x] **Step 3: Add types and tables**
 
 Use exact mode values `ASK`, `PLAN`, `LEARN`, and `CHECK`. Add tables: `ActivityState(workspace_id unique, active_mode, active_concept_id, suspended_activity JSON, return_checkpoint, nudge_cooldown_until, updated_at)`, `LearnerProfile(workspace_id unique, inferred_fields JSON, confirmed_fields JSON)`, `LearningPlan(id, workspace_id, goal, status, created_at)`, `Concept(id, plan_id, order, title, objective, status, evidence_refs JSON)`, `Assessment(id, concept_id nullable, kind, prompt, options JSON, answer_key, evidence_refs JSON, feedback_blocks JSON, citations JSON)`, and `Attempt(id, assessment_id, response, result, status, created_at)`. Status enums must include `not_started`, `active`, `completed`, `needs_review`, and `not_assessed` where applicable. Diagnostic and immediate-check answers remain server-only; public schemas never expose `answer_key`.
 
-- [ ] **Step 4: Run migration and domain tests**
+**Implementation notes (2026-09-07):** Concept and Assessment also persist Workspace ownership; composite foreign keys prevent cross-Workspace links. Assessment `kind` records the question format, while `purpose` distinguishes diagnostic from immediate check. Diagnostic questions may have no Concept. Answer keys are JSON arrays stored only on the server. Skipped Attempts have null response/result and `not_assessed`; they do not update Concept mastery. Suspended activity JSON must be revalidated against Workspace ownership when the orchestrator is added in Task 6.
+
+- [x] **Step 4: Run migration and domain tests**
 
 Run: `cd apps/api && ../../.venv/bin/alembic upgrade head && cd ../.. && .venv/bin/pytest apps/api/tests/domain/test_learning_state.py -q`
 
 Expected: migration succeeds; suspend, resume, skip, and completed-checkpoint tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
