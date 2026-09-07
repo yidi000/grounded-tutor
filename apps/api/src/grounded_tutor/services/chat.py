@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
-from uuid import UUID
+from time import perf_counter
+from uuid import UUID, uuid4
 
 from grounded_tutor.adapters.fastgpt import FastGPTPort, RetrievedChunk, SearchRequest
 from grounded_tutor.adapters.generation import (
@@ -9,7 +12,7 @@ from grounded_tutor.adapters.generation import (
     GenerationRequest,
     InvalidGenerationOutput,
 )
-from grounded_tutor.domain.answers import GroundedAnswer
+from grounded_tutor.domain.answers import GeneratedAnswer, GroundedAnswer
 from grounded_tutor.domain.schemas import ChatHistoryResponse
 from grounded_tutor.repositories.chat import (
     ChatConversationNotFoundError,
@@ -19,6 +22,9 @@ from grounded_tutor.repositories.chat import (
 from grounded_tutor.repositories.sources import SourcePersistenceError, SourceRepository
 from grounded_tutor.services.grounding import ReadyChunk, ground_generated_answer
 from grounded_tutor.services.idempotency import request_hash
+from grounded_tutor.services.tracing import TracePersistenceError, TraceRecorder
+
+logger = logging.getLogger(__name__)
 
 RETRY_INSTRUCTION = (
     "Validation correction: return only unique nonblank answer blocks, and give every block "
@@ -51,11 +57,13 @@ class ChatService:
         chats: ChatRepository,
         fastgpt: FastGPTPort,
         generation: GenerationPort,
+        tracing: TraceRecorder | None = None,
     ) -> None:
         self._sources = sources
         self._chats = chats
         self._fastgpt = fastgpt
         self._generation = generation
+        self._tracing = tracing
 
     def history(self, workspace_id: UUID) -> ChatHistoryResponse:
         if self._sources.get_workspace_dataset_id(workspace_id) is None:
@@ -93,14 +101,93 @@ class ChatService:
                 invalid = True
             if invalid:
                 raise ChatPersistenceError()
+        started = perf_counter()
+        trace = {
+            "workspace_id": workspace_id,
+            "request_id": str(uuid4()),
+            "route": "ASK",
+            "retrieval": {"chunk_ids": [], "scores": [], "chunks": []},
+            "generation": {
+                "instruction": message,
+                "conversation_id": str(conversation_id) if conversation_id else None,
+                "prompt_version": "source-material-v1",
+                "attempts": [],
+            },
+            "validation": {"valid": True},
+            "timing": {},
+        }
         error = None
         try:
-            return await self._ask(workspace_id, message, conversation_id, idempotency_key, dataset_id)
+            result = await self._ask(
+                workspace_id, message, conversation_id, idempotency_key, dataset_id, trace
+            )
         except BaseException as caught:  # noqa: BLE001 - release the claim on cancellation too.
             error = caught
-        # Includes cancellation. Completed responses survive uncertain commit errors.
-        self._chats.release_request(workspace_id, idempotency_key)
-        raise error
+        if error is not None:
+            # Includes cancellation. Completed responses survive uncertain commit errors.
+            self._chats.release_request(workspace_id, idempotency_key)
+            if not isinstance(error, ChatConversationNotFoundError):
+                trace["validation"] = {
+                    "valid": False,
+                    "error_code": "external_failure"
+                    if isinstance(error, ExternalChatServiceError)
+                    else "cancelled"
+                    if isinstance(error, asyncio.CancelledError)
+                    else "unexpected_exception",
+                }
+                self._record_trace(trace, started)
+            raise error
+        trace["validation"].update(
+            {
+                "status": result.answer.status,
+                "conversation_id": str(result.conversation_id),
+                "message_id": str(result.message_id),
+            }
+        )
+        trace["generation"]["answer"] = result.answer.model_dump(mode="json")
+        self._record_trace(trace, started)
+        return result
+
+    def _record_trace(self, trace: dict, started: float) -> None:
+        trace["timing"]["total_ms"] = (perf_counter() - started) * 1000
+        if self._tracing is not None:
+            try:
+                self._tracing.record(**trace)
+            except TracePersistenceError:
+                # Diagnostics must not replace the primary result or trigger duplicate work.
+                logger.warning("Unable to persist execution trace %s", trace["request_id"])
+
+    async def _generate(self, request: GenerationRequest, trace: dict) -> GeneratedAnswer:
+        attempt = {"instruction": request.instruction}
+        trace["generation"]["attempts"].append(attempt)
+        started = perf_counter()
+        try:
+            generated = await self._generation.generate_content(request)
+        except InvalidGenerationOutput:
+            attempt["outcome"] = "invalid_output"
+            raise
+        except asyncio.CancelledError:
+            attempt["outcome"] = "cancelled"
+            raise
+        except Exception:
+            attempt["outcome"] = "external_failure"
+            raise
+        finally:
+            attempt["elapsed_ms"] = (perf_counter() - started) * 1000
+        attempt.update({"outcome": "generated", "output": generated.model_dump(mode="json")})
+        return generated
+
+    @staticmethod
+    def _validate(
+        generated: GeneratedAnswer, ready_chunks: dict[str, ReadyChunk], trace: dict
+    ) -> GroundedAnswer:
+        answer = ground_generated_answer(generated, ready_chunks, allowed_kinds={"answer"})
+        valid = not generated.blocks or len(answer.answer_blocks) == len(generated.blocks)
+        trace["generation"]["attempts"][-1]["valid"] = valid
+        trace["validation"] = {"valid": valid}
+        if not valid:
+            trace["validation"]["error_code"] = "citation_failure"
+        return answer
 
     async def _ask(
         self,
@@ -109,6 +196,7 @@ class ChatService:
         conversation_id: UUID | None,
         idempotency_key: str,
         dataset_id: str,
+        trace: dict,
     ) -> ChatResult:
         if conversation_id is not None and not self._chats.conversation_belongs_to_workspace(
             workspace_id, conversation_id
@@ -127,10 +215,13 @@ class ChatService:
             )
 
         external_failure = False
+        search_started = perf_counter()
         try:
             raw_chunks = await self._fastgpt.search(SearchRequest(dataset_id, message))
         except Exception:  # noqa: BLE001 - redact every adapter failure.
             external_failure = True
+        finally:
+            trace["timing"]["retrieval_ms"] = (perf_counter() - search_started) * 1000
         if external_failure:
             raise ExternalChatServiceError()
 
@@ -146,6 +237,24 @@ class ChatService:
                 source=source,
                 retrieval_position=len(filtered_chunks),
             )
+        trace["retrieval"] = {
+            "received_count": len(raw_chunks),
+            "chunk_ids": list(ready_chunks),
+            "scores": [ready.chunk.score for ready in ready_chunks.values()],
+            "chunks": [
+                {
+                    "chunk_id": ready.chunk.chunk_id,
+                    "q": ready.chunk.q,
+                    "a": ready.chunk.a,
+                    "source_id": str(ready.source.id),
+                    "source_name": ready.source.name,
+                    "source_version": ready.source.version,
+                    "source_type": ready.source.source_type.value,
+                    "position": ready.retrieval_position,
+                }
+                for ready in ready_chunks.values()
+            ],
+        }
         if not filtered_chunks:
             return self._persist(
                 workspace_id, conversation_id, message, idempotency_key, _insufficient()
@@ -155,7 +264,7 @@ class ChatService:
         invalid_output = False
         external_failure = False
         try:
-            generated = await self._generation.generate_content(request)
+            generated = await self._generate(request, trace)
         except InvalidGenerationOutput:
             invalid_output = True
         except Exception:  # noqa: BLE001 - redact every adapter failure.
@@ -163,11 +272,15 @@ class ChatService:
         if external_failure:
             raise ExternalChatServiceError()
         if invalid_output:
-            answer = await self._retry_generation(message, tuple(filtered_chunks), ready_chunks)
+            answer = await self._retry_generation(
+                message, tuple(filtered_chunks), ready_chunks, trace
+            )
         else:
-            answer = ground_generated_answer(generated, ready_chunks, allowed_kinds={"answer"})
+            answer = self._validate(generated, ready_chunks, trace)
             if not generated.blocks or len(answer.answer_blocks) != len(generated.blocks):
-                answer = await self._retry_generation(message, tuple(filtered_chunks), ready_chunks)
+                answer = await self._retry_generation(
+                    message, tuple(filtered_chunks), ready_chunks, trace
+                )
 
         return self._persist(workspace_id, conversation_id, message, idempotency_key, answer)
 
@@ -176,12 +289,13 @@ class ChatService:
         message: str,
         chunks: tuple[RetrievedChunk, ...],
         ready_chunks: dict[str, ReadyChunk],
+        trace: dict,
     ) -> GroundedAnswer:
         request = GenerationRequest("ASK", f"{message}\n\n{RETRY_INSTRUCTION}", chunks)
         invalid_output = False
         external_failure = False
         try:
-            generated = await self._generation.generate_content(request)
+            generated = await self._generate(request, trace)
         except InvalidGenerationOutput:
             invalid_output = True
         except Exception:  # noqa: BLE001 - redact every adapter failure.
@@ -189,8 +303,13 @@ class ChatService:
         if external_failure:
             raise ExternalChatServiceError()
         if invalid_output:
+            trace["validation"] = {
+                "valid": False,
+                "error_code": "citation_failure",
+                "reason": "invalid_output",
+            }
             return _insufficient()
-        return ground_generated_answer(generated, ready_chunks, allowed_kinds={"answer"})
+        return self._validate(generated, ready_chunks, trace)
 
     def _persist(
         self,

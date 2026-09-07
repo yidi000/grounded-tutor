@@ -16,6 +16,7 @@ from grounded_tutor.services.chat import ChatService
 from grounded_tutor.services.previews import PreviewService
 from grounded_tutor.services.source_locks import WorkspaceLockRegistry
 from grounded_tutor.services.sources import SourceService
+from grounded_tutor.services.tracing import TraceRecorder
 from grounded_tutor.services.workspaces import WorkspaceService
 
 
@@ -79,4 +80,5 @@ def get_chat_service(
         ChatRepository(session),
         fastgpt,
         generation,
+        tracing=TraceRecorder(session),
     )

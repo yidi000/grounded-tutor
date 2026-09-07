@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o-mini"
     external_mode: Literal["fake", "live"] = "fake"
     demo_read_only: bool = False
+    enable_local_admin: bool = False
     supports_custom_pdf_parse: bool = False
     supports_vector_model: bool = False
     supports_agent_model: bool = False

@@ -155,3 +155,41 @@ class RequestRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
     )
+
+
+class ExecutionTrace(Base):
+    __tablename__ = "execution_traces"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    request_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    route: Mapped[str] = mapped_column(String(32), nullable=False)
+    retrieval_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    generation_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    validation_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    timing_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )
+
+
+class BadCase(Base):
+    __tablename__ = "bad_cases"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    trace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("execution_traces.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open", server_default="open")
+    note: Mapped[str] = mapped_column(String, nullable=False, default="", server_default="")
+    resolution: Mapped[str] = mapped_column(String, nullable=False, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )

@@ -218,7 +218,7 @@ prompt is not a permanent external input-schema guarantee.
 - Create: `apps/api/src/grounded_tutor/routers/admin_evals.py`
 - Create: `apps/api/tests/services/test_tracing.py`
 
-- [ ] **Step 1: Write the failing trace test**
+- [x] **Step 1: Write the failing trace test**
 
 ```python
 def test_trace_contains_replay_fields_without_secrets(trace_recorder) -> None:
@@ -232,28 +232,42 @@ def test_trace_contains_replay_fields_without_secrets(trace_recorder) -> None:
     assert "api_key" not in trace.model_dump_json().lower()
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_tracing.py -q`
 
 Expected: FAIL because trace records do not exist.
 
-- [ ] **Step 3: Implement trace and Bad Case records**
+- [x] **Step 3: Implement trace and Bad Case records**
 
 Add `ExecutionTrace(request_id, workspace_id, route, retrieval_json, generation_json, validation_json, timing_json, created_at)` and `BadCase(trace_id, category, status, note, resolution, created_at, updated_at)`. Redact keys matching `authorization`, `api_key`, `token`, `secret`, and `cookie` recursively before persistence. Create a Bad Case automatically for external failures, citation failure after retry, wrong-route evaluation, and unexpected exception. Expose read-only local-admin endpoints only when `ENABLE_LOCAL_ADMIN=true`.
 
-- [ ] **Step 4: Verify redaction and replay payloads**
+- [x] **Step 4: Verify redaction and replay payloads**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_tracing.py -q`
 
 Expected: trace success, recursive redaction, auto Bad Case, and disabled-admin endpoint tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
 git commit -m "feat: add evaluation traces and bad cases"
 ```
+
+Implementation notes (2026-09-07): migration 0006 follows 0005. API ASK
+records filtered evidence snapshots, both generation attempts, final validation,
+and timings after its application transaction settles; completed request replays
+do not generate another trace. Trace and optional Bad Case commit atomically.
+Normal abstention and a successful correction are not Bad Cases. Wrong-route
+classification is available to the future evaluator; no evaluator is added here.
+
+The inspection API is disabled by default, unavailable in demo mode, and requires
+both a loopback peer and local Host. It is read-only, with bounded lists and
+optional workspace filters. See `docs/local-evaluation-traces.md` for endpoints,
+redaction, retained private study content, and failure/retention boundaries.
+Trace persistence failures emit only a generated request ID and preserve the
+primary response/error. Embedded service callers opt in with a TraceRecorder.
 
 ### Task 5: Build the 40-case deterministic evaluator
 
