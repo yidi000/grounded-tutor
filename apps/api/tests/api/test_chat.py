@@ -413,6 +413,8 @@ def test_chat_reports_pending_key_without_calling_providers(
         "message": "Question", "idempotency_key": "pending",
     })
     assert response.status_code == 409
-    assert "idempotency_in_progress" in response.text
+    from grounded_tutor.domain.schemas import ApiErrorResponse
+
+    assert ApiErrorResponse.model_validate(response.json()).detail.code == "idempotency_in_progress"
     assert fake_fastgpt.search_calls == []
     assert fake_generation.calls == []

@@ -606,3 +606,13 @@ describe("App", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+
+it("preserves the pending idempotency error instead of reporting an external failure", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(
+    { detail: { code: "idempotency_in_progress" } }, { status: 409 },
+  )));
+  await expect(apiFetch(z.unknown(), "/api/workspaces/test/chat")).rejects.toMatchObject({
+    status: 409, code: "idempotency_in_progress",
+  });
+});

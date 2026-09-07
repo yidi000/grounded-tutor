@@ -76,6 +76,39 @@ test("local paste review accept and keyboard-open cited ASK", async ({ page }, t
   await page.screenshot({ path: testInfo.outputPath("restored-history.png") });
 });
 
+test("local retry after a lost response restores one persisted answer", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("local-"));
+  await page.goto("/");
+  await createWorkspace(page, `Retry recovery ${testInfo.project.name}`);
+  await pasteAndAccept(page, "Retry notes", "Mean is an average.", testInfo, false);
+  const payloads: unknown[] = [];
+  const messageIds: string[] = [];
+  let chatUrl = "";
+  await page.route("**/chat", async (route) => {
+    chatUrl = route.request().url();
+    payloads.push(route.request().postDataJSON());
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    messageIds.push((await response.json()).message_id);
+    if (payloads.length === 1) await route.abort("failed");
+    else await route.fulfill({ response });
+  });
+  const composer = page.getByLabel("向资料提问");
+  await composer.fill("What is a mean?");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("当前无法完成提问");
+  await expect(composer).toHaveValue("What is a mean?");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(page.getByRole("button", { name: "引用 1：Retry notes" })).toHaveCount(1);
+  expect(payloads).toHaveLength(2);
+  expect(payloads[1]).toEqual(payloads[0]);
+  expect(messageIds[1]).toBe(messageIds[0]);
+  const history = await page.request.get(`${chatUrl}/history`);
+  expect((await history.json()).exchanges).toHaveLength(1);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "引用 1：Retry notes" })).toHaveCount(1);
+});
+
 test("demo opens fixed citation and performs no write request", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("demo-"));
   const writes: string[] = [];
@@ -119,7 +152,7 @@ async function createWorkspace(page: Page, title: string) {
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 }
 
-async function pasteAndAccept(page: Page, name: string, content: string, testInfo: TestInfo) {
+async function pasteAndAccept(page: Page, name: string, content: string, testInfo: TestInfo, pendingPreview = true) {
   await page.getByRole("button", { name: "粘贴文本", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "添加学习资料" });
   await dialog.getByRole("button", { name: "粘贴文本", exact: true }).click();
@@ -129,11 +162,13 @@ async function pasteAndAccept(page: Page, name: string, content: string, testInf
   await expect(dialog.getByText("本地估算")).toBeVisible();
   await dialog.getByRole("button", { name: "确认处理" }).click();
   await expect(dialog.getByText("实际处理结果")).toBeVisible();
-  await expect(dialog.getByText(/可能仍在处理/)).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "接受并用于问答" })).toBeDisabled();
-  await expectDesktopContract(page);
-  await page.screenshot({ path: testInfo.outputPath("pending-source-preview.png") });
-  await dialog.getByRole("button", { name: "刷新处理结果" }).click();
+  if (pendingPreview) {
+    await expect(dialog.getByText(/可能仍在处理/)).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "接受并用于问答" })).toBeDisabled();
+    await expectDesktopContract(page);
+    await page.screenshot({ path: testInfo.outputPath("pending-source-preview.png") });
+    await dialog.getByRole("button", { name: "刷新处理结果" }).click();
+  }
   await expect(dialog.getByText(content, { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "接受并用于问答" }).click();
   await expect(dialog.getByText("资料已准备好")).toBeVisible();

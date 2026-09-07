@@ -17,6 +17,7 @@ EXPECTED_PUBLIC_ERROR_CODES = {
     "empty_source",
     "external_service_error",
     "file_too_large",
+    "idempotency_in_progress",
     "idempotency_key_reused",
     "invalid_chunk_settings",
     "invalid_source_transition",

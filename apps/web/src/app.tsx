@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tan
 import { useEffect, useRef, useState } from "react";
 
 import { api, apiFetch } from "./api/client";
-import { SourceIngestionCapabilitiesSchema, type ChatHistoryResponse, type Citation, type SourceResponse, type WorkspaceResponse } from "./api/types";
+import { SourceIngestionCapabilitiesSchema, type ChatRequest, type ChatHistoryResponse, type Citation, type SourceResponse, type WorkspaceResponse } from "./api/types";
 import { AppShell } from "./components/app-shell";
 import { Composer } from "./components/composer";
 import { ContextPanel } from "./components/context-panel";
@@ -34,6 +34,10 @@ function LocalNotebook() {
   const [currentId, setCurrentId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("workspace"));
   const [workspaceDialog, setWorkspaceDialog] = useState(false);
   const [wizard, setWizard] = useState<{ open: boolean; file?: File; source?: SourceResponse; intent?: "review" | "reprocess" }>({ open: false });
+  // ponytail: retries survive topic switches, not page reloads; persist requests if reload recovery is needed.
+  const retryRequests = useRef<Record<string, ChatRequest>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [failedAsks, setFailedAsks] = useState<string[]>([]);
   const [pendingAsks, setPendingAsks] = useState<string[]>([]);
   const [citation, setCitation] = useState<Citation | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
@@ -64,20 +68,26 @@ function LocalNotebook() {
   function closeWorkspaceDialog() { setWorkspaceDialog(false); window.setTimeout(() => lastTrigger.current?.focus(), 0); }
   function dismissCitation() { setCitation(null); setSelectedBlockId(null); }
   function closeCitation() { dismissCitation(); window.setTimeout(() => citationTrigger.current?.focus(), 0); }
-  function selectWorkspace(workspace: WorkspaceResponse) { chatGeneration.current += 1; setCurrentId(workspace.id); setCitation(null); setSelectedBlockId(null); }
+  function selectWorkspace(workspace: WorkspaceResponse) { if (workspace.id === currentId) return; chatGeneration.current += 1; setCurrentId(workspace.id); setCitation(null); setSelectedBlockId(null); }
   async function ask(question: string) {
     if (!current || !chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(current.id)) return;
     const workspaceId = current.id;
+    const previous = retryRequests.current[workspaceId];
+    const payload = previous?.message === question ? previous : { conversation_id: conversationId, message: question, idempotency_key: crypto.randomUUID() };
+    retryRequests.current[workspaceId] = payload;
+    setFailedAsks((items) => items.filter((id) => id !== workspaceId));
     setPendingAsks((items) => [...items, workspaceId]);
     const generation = chatGeneration.current;
     try {
-      const response = await api.ask(current.id, { conversation_id: conversationId, message: question, idempotency_key: crypto.randomUUID() });
+      const response = await api.ask(workspaceId, payload);
+      delete retryRequests.current[workspaceId];
       await queryClient.cancelQueries({ queryKey: ["chat-history", workspaceId] });
       queryClient.setQueryData<ChatHistoryResponse>(["chat-history", workspaceId], (history) => history?.exchanges.some((item) => item.response.message_id === response.message_id) ? history : ({ exchanges: [...(history?.exchanges ?? []), { question, response }] }));
       // Re-read persisted history after a workspace switch, including older turns.
       if (generation !== chatGeneration.current) await queryClient.invalidateQueries({ queryKey: ["chat-history", workspaceId] });
     } catch (error) {
-      if (generation === chatGeneration.current) throw error;
+      setFailedAsks((items) => [...items, workspaceId]);
+      throw error;
     } finally {
       setPendingAsks((items) => items.filter((id) => id !== workspaceId));
     }
@@ -92,7 +102,7 @@ function LocalNotebook() {
     <AppShell
       headerActions={capabilities.isSuccess ? <div className="top-actions"><button className="materials-button" type="button" onClick={() => current && openWizard()} disabled={!current}>资料 · {readyCount} 已就绪</button><button className="primary-button compact" type="button" onClick={() => current && openWizard()} disabled={!current}>上传你的资料 ＋</button></div> : undefined}
       topicRail={<TopicRail mode="local" workspaces={workspaces.data} currentId={currentId} onSelect={selectWorkspace} onCreate={capabilities.isSuccess ? () => { rememberTrigger(); setWorkspaceDialog(true); } : undefined} onRenamed={upsert} />}
-      conversation={<ConversationSurface intro={intro} activity={<>{current && chatHistory.isFetching && <p role="status">正在读取历史对话…</p>}{current && chatHistory.isError && <div className="insufficient-state" role="alert"><p>暂时无法读取历史对话</p><button type="button" onClick={() => void chatHistory.refetch()}>重新加载对话</button></div>}{exchanges.length ? <ChatView exchanges={exchanges} selectedBlockId={selectedBlockId} onAddSource={() => openWizard()} onRephrase={() => document.getElementById("study-question")?.focus()} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} /> : null}</>} onFileDrop={current && capabilities.data ? (file) => openWizard({ file }) : undefined}><Composer key={current?.id ?? "no-workspace"} mode="local" ready={readyCount > 0} blocked={!chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(currentId ?? "")} onAddSource={current ? () => openWizard() : undefined} onSubmit={ask} /></ConversationSurface>}
+      conversation={<ConversationSurface intro={intro} activity={<>{current && chatHistory.isFetching && <p role="status">正在读取历史对话…</p>}{current && chatHistory.isError && <div className="insufficient-state" role="alert"><p>暂时无法读取历史对话</p><button type="button" onClick={() => void chatHistory.refetch()}>重新加载对话</button></div>}{exchanges.length ? <ChatView exchanges={exchanges} selectedBlockId={selectedBlockId} onAddSource={() => openWizard()} onRephrase={() => document.getElementById("study-question")?.focus()} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} /> : null}</>} onFileDrop={current && capabilities.data ? (file) => openWizard({ file }) : undefined}><Composer key={current?.id ?? "no-workspace"} mode="local" draft={drafts[currentId ?? ""] ?? ""} onDraftChange={(draft) => setDrafts((items) => ({ ...items, [currentId ?? ""]: draft }))} failed={failedAsks.includes(currentId ?? "")} ready={readyCount > 0} blocked={!chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(currentId ?? "")} onAddSource={current ? () => openWizard() : undefined} onSubmit={ask} /></ConversationSurface>}
       contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} onDismissCitation={dismissCitation} sources={current ? <SourcePanel workspaceId={current.id} onAdd={() => openWizard()} onReview={(source) => openWizard({ source, intent: "review" })} onReprocess={(source) => openWizard({ source, intent: "reprocess" })} /> : undefined} />}
     />
     {capabilities.data && <WorkspaceDialog open={workspaceDialog} capabilities={capabilities.data} onClose={closeWorkspaceDialog} onCreated={addWorkspace} />}

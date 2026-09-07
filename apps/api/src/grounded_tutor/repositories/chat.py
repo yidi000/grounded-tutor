@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import insert, literal_column, select
+from sqlalchemy import delete, insert, literal_column, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,8 @@ class ChatRepository:
     def claim_request(self, workspace_id: UUID, key: str, request_hash: str) -> dict | None:
         collision = False
         failed = False
+        inserted = False
+        claim_token = str(uuid4())
         try:
             self._session.execute(
                 insert(RequestRecord).values(
@@ -44,16 +46,23 @@ class ChatRepository:
                     idempotency_key=key,
                     request_hash=request_hash,
                     state="pending",
+                    # Completion replaces this private ownership marker with the response.
+                    response_json={"_claim_token": claim_token},
                 )
             )
+            inserted = True
             self._session.commit()
         except IntegrityError:
             self._rollback()
-            collision = True
+            collision = not inserted
+            failed = inserted
         except SQLAlchemyError:
             self._rollback()
             failed = True
         if failed:
+            # A lost commit acknowledgement may leave our claim durable. The token
+            # protects a replacement claimant that inserted after our rollback.
+            self.release_request(workspace_id, key, claim_token=claim_token)
             raise ChatPersistenceError()
         if not collision:
             return None
@@ -72,14 +81,23 @@ class ChatRepository:
             raise ChatPersistenceError()
         return record.response_json
 
-    def release_request(self, workspace_id: UUID, key: str) -> None:
+    def release_request(
+        self, workspace_id: UUID, key: str, *, claim_token: str | None = None
+    ) -> None:
         failed = False
         try:
             self._session.rollback()
-            record = self._session.get(RequestRecord, (workspace_id, key))
-            if record is not None and record.state == "pending":
-                self._session.delete(record)
-                self._session.commit()
+            statement = delete(RequestRecord).where(
+                RequestRecord.workspace_id == workspace_id,
+                RequestRecord.idempotency_key == key,
+                RequestRecord.state == "pending",
+            )
+            if claim_token is not None:
+                statement = statement.where(
+                    RequestRecord.response_json["_claim_token"].as_string() == claim_token
+                )
+            self._session.execute(statement)
+            self._session.commit()
         except SQLAlchemyError:
             self._rollback()
             failed = True

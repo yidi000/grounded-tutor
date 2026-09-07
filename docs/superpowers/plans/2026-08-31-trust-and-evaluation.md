@@ -115,6 +115,16 @@ replay the persisted result; changed payloads return 409 `idempotency_key_reused
 Generation failures, cancellation, and uncommitted write failures release claims.
 A lost acknowledgement after a successful commit preserves the completed result.
 
+Review corrections (2026-09-07): browser retries retain the original question,
+conversation ID, and idempotency key for the unresolved logical request during
+the current page lifetime (including topic switches, not full reloads); new
+questions and questions after success receive a fresh key. Clicking the selected
+workspace must not abandon a pending submission or clear its failed draft.
+`idempotency_in_progress` belongs to both public error contracts. Initial claim
+commit recovery uses a unique owner marker in the pending response JSON, replaced
+by the final response at completion. Cleanup is conditional on that marker so a
+new concurrent claimant cannot be deleted after rollback. No migration is needed.
+
 P0 recovery boundary: forced process termination or failure to release a claim can
 leave a pending record. It intentionally does not expire automatically. Before
 manual removal of that specific pending record, stop the original worker and

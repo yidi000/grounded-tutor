@@ -81,3 +81,69 @@ it("continues the restored conversation without duplicating its old answer", asy
   expect(payload?.conversation_id).toBe(demoFixture.exchange.response.conversation_id);
   expect(screen.getAllByText("Answer A")).toHaveLength(1);
 });
+
+function serveAsks(post: (payload: Record<string, unknown>, id: string) => Response | Promise<Response>, read = () => Response.json({ exchanges: [] })) {
+  serve(read);
+  const get = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith("/chat") && init?.method === "POST"
+    ? post(JSON.parse(String(init.body)), String(input).split("/")[3]) : get(input, init)));
+}
+async function sendQuestion(question?: string) {
+  await waitFor(() => expect(screen.getByLabelText("向资料提问")).toBeEnabled());
+  if (question !== undefined) { await userEvent.clear(screen.getByLabelText("向资料提问")); await userEvent.type(screen.getByLabelText("向资料提问"), question); }
+  await userEvent.click(screen.getByRole("button", { name: "发送" }));
+}
+it("reuses the exact lost-response request after topic switches and refreshed history, then starts a new request after success", async () => {
+  const payloads: Record<string, unknown>[] = [];
+  let persisted = false;
+  serveAsks((payload) => {
+    payloads.push(payload);
+    if (payloads.length === 1) { persisted = true; return Promise.reject(new TypeError("Lost response")); }
+    return Response.json(demoFixture.exchange.response);
+  }, () => Response.json(persisted ? history("A") : { exchanges: [] }));
+  render(<App mode="local" />);
+  await sendQuestion("Same question");
+  await screen.findByRole("alert");
+  await selectTopic(1);
+  await selectTopic(0);
+  await screen.findByText("Answer A");
+  await sendQuestion("Same question");
+  await waitFor(() => expect(screen.getByLabelText("向资料提问")).toHaveValue(""));
+  expect(payloads[1]).toEqual(payloads[0]);
+  expect(payloads[1].conversation_id).toBeNull();
+  expect(screen.getAllByText("Answer A")).toHaveLength(1);
+  await sendQuestion("Same question");
+  await waitFor(() => expect(payloads).toHaveLength(3));
+  expect(payloads[2].idempotency_key).not.toBe(payloads[1].idempotency_key);
+  expect(payloads[2].conversation_id).toBe(demoFixture.exchange.response.conversation_id);
+});
+it("allocates a new key for an edited failed question and isolates retries by topic", async () => {
+  const calls: { payload: Record<string, unknown>; id: string }[] = [];
+  serveAsks((payload, id) => { calls.push({ payload, id }); return Promise.reject(new TypeError("Lost response")); });
+  render(<App mode="local" />);
+  await sendQuestion("Original");
+  await screen.findByRole("alert");
+  await sendQuestion("Edited");
+  await screen.findByRole("alert");
+  expect(calls[1].payload.idempotency_key).not.toBe(calls[0].payload.idempotency_key);
+  await selectTopic(1);
+  await sendQuestion("Edited");
+  await screen.findByRole("alert");
+  expect(calls[2].payload.idempotency_key).not.toBe(calls[1].payload.idempotency_key);
+  expect(calls[2].id).toBe(ids[1]);
+  await selectTopic(0);
+  await sendQuestion("Edited");
+  await screen.findByRole("alert");
+  expect(calls[3]).toEqual(calls[1]);
+});
+it.each([false, true])("retains a pending draft and reports failure after selecting the active topic (round trip: %s)", async (roundTrip) => {
+  let reject!: (error: Error) => void;
+  serveAsks(() => new Promise<Response>((_, fail) => { reject = fail; }));
+  render(<App mode="local" />);
+  await sendQuestion("Keep this question");
+  if (roundTrip) await selectTopic(1);
+  await selectTopic(0);
+  await act(async () => reject(new TypeError("Lost response")));
+  expect(screen.getByLabelText("向资料提问")).toHaveValue("Keep this question");
+  expect(await screen.findByRole("alert")).toHaveTextContent("当前无法完成提问");
+});

@@ -4,15 +4,20 @@ import type { AppMode } from "../config";
 
 type ComposerProps = {
   mode: AppMode;
+  draft?: string;
+  onDraftChange?: (draft: string) => void;
+  failed?: boolean;
   onAddSource?: () => void;
   ready?: boolean;
   blocked?: boolean;
   onSubmit?: (question: string) => Promise<void>;
 };
 
-export function Composer({ mode, onAddSource, ready = false, blocked = false, onSubmit }: ComposerProps) {
+export function Composer({ mode, onAddSource, ready = false, blocked = false, onSubmit, draft: controlledDraft, onDraftChange, failed: externalFailed = false }: ComposerProps) {
   const isDemo = mode === "demo_read_only";
-  const [draft, setDraft] = useState("");
+  const [localDraft, setLocalDraft] = useState("");
+  const draft = controlledDraft ?? localDraft;
+  const setDraft = onDraftChange ?? setLocalDraft;
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState(false);
   const enabled = !isDemo && ready && !blocked && Boolean(onSubmit);
@@ -56,7 +61,7 @@ export function Composer({ mode, onAddSource, ready = false, blocked = false, on
           {sending ? "发送中" : "发送"}
         </button>
       </div>
-      {failed && <p className="composer-error" role="alert">当前无法完成提问，请保留内容后重试。</p>}
+      {(externalFailed || failed) && <p className="composer-error" role="alert">当前无法完成提问，请保留内容后重试。</p>}
       <p>
         {isDemo
           ? "这是预先生成的回答；真实提问请使用本地版本。"
