@@ -10,6 +10,10 @@ from pydantic import ValidationError
 
 from grounded_tutor.adapters.fastgpt import RetrievedChunk
 from grounded_tutor.domain.answers import (
+    MAX_ANSWER_BLOCKS,
+    MAX_ANSWER_CITATIONS,
+    MAX_BLOCK_TEXT_CHARS,
+    MAX_CITATION_EXCERPT_CHARS,
     ChunkLocator,
     Citation,
     GeneratedAnswer,
@@ -62,6 +66,8 @@ def ground_generated_answer(
     *,
     allowed_kinds: set[GroundedContentKind],
 ) -> GroundedAnswer:
+    if len(generated.blocks) > MAX_ANSWER_BLOCKS:
+        return GroundedAnswer(status="insufficient_material", answer_blocks=(), citations=())
     normalized_ids = [block.id.strip() for block in generated.blocks]
     duplicate_ids = {
         block_id for block_id, count in Counter(normalized_ids).items() if block_id and count > 1
@@ -74,6 +80,7 @@ def ground_generated_answer(
         if (
             not block_id
             or block_id in duplicate_ids
+            or len(block.text) > MAX_BLOCK_TEXT_CHARS
             or not text
             or block.kind not in allowed_kinds
             or not chunk_ids
@@ -86,6 +93,8 @@ def ground_generated_answer(
         return GroundedAnswer(status="insufficient_material", answer_blocks=(), citations=())
 
     used_chunk_ids = {chunk_id for _, _, _, chunk_ids in valid for chunk_id in chunk_ids}
+    if len(used_chunk_ids) > MAX_ANSWER_CITATIONS:
+        return GroundedAnswer(status="insufficient_material", answer_blocks=(), citations=())
     ordered_chunks = [
         ready for chunk_id, ready in ready_chunks.items() if chunk_id in used_chunk_ids
     ]
@@ -120,7 +129,7 @@ def _is_resolvable(chunk_id: str, ready_chunks: dict[str, ReadyChunk]) -> bool:
         and ready is not None
         and ready.chunk.chunk_id == chunk_id
         and ready.source.status is SourceStatus.READY
-        and bool(_chunk_analysis(ready)[0])
+        and 0 < len(_chunk_analysis(ready)[0]) <= MAX_CITATION_EXCERPT_CHARS
         and ready.retrieval_position >= 1
     )
 

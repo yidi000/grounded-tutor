@@ -5,6 +5,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+MAX_ANSWER_BLOCKS = 32
+MAX_ANSWER_CITATIONS = 64
+MAX_BLOCK_TEXT_CHARS = 6000
+MAX_CITATION_EXCERPT_CHARS = 12000
+MAX_CITATION_CONTEXT_CHARS = 2000
+
 GroundedContentKind = Literal["answer", "definition", "explanation", "example"]
 
 
@@ -131,8 +137,8 @@ class Citation(BaseModel):
     source_version: int = Field(ge=1)
     chunk_id: str
     excerpt: str
-    context_before: str | None = None
-    context_after: str | None = None
+    context_before: str | None = Field(default=None, max_length=MAX_CITATION_CONTEXT_CHARS)
+    context_after: str | None = Field(default=None, max_length=MAX_CITATION_CONTEXT_CHARS)
     locator: SourceLocator
 
     @field_validator("id", "source_name", "chunk_id", "excerpt")

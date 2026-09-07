@@ -1185,21 +1185,21 @@ Report both viewport screenshots, full gate results, citation accessibility chec
 - Modify: `apps/api/src/grounded_tutor/services/chat.py`
 - Create: `apps/api/tests/security/test_grounded_blocks.py`
 
-- [ ] **Step 1: Add failing adversarial cases**
+- [x] **Step 1: Add failing adversarial cases**
 
 Cover duplicate block IDs, duplicate citation IDs, valid chunk ID from a non-READY Source, correct Collection in another Workspace, blank factual text, excessive block count, excessive citation count, provider text containing fake `[1]` labels, and model output that changes shape on retry.
 
-- [ ] **Step 2: Run the audit tests**
+- [x] **Step 2: Run the audit tests**
 
 Run: `.venv/bin/pytest apps/api/tests/security/test_grounded_blocks.py -q`
 
 Expected: at least one bound or isolation case fails before hardening.
 
-- [ ] **Step 3: Apply bounded deterministic validation**
+- [x] **Step 3: Apply bounded deterministic validation**
 
 Cap blocks, citations, block text, excerpts, and optional context using named constants. Citation validity depends only on the filtered retrieval map supplied by ChatService. Provider-authored bracket labels remain plain text and never become Evidence Anchors.
 
-- [ ] **Step 4: Verify and STOP GATE**
+- [x] **Step 4: Verify and STOP GATE**
 
 Run:
 
@@ -1217,6 +1217,16 @@ git commit -m "test: harden grounded block validation"
 ```
 
 Report the adversarial matrix and stop. Trust Tasks 2–6 then continue unchanged.
+
+Task 1 implementation notes (2026-09-07): bounds are 32 answer blocks,
+64 unique citations per answer, 6,000 characters per block, 12,000 characters
+per excerpt, and 2,000 characters for each optional context field. Over-limit
+blocks/evidence are rejected rather than truncated; count overflow rejects the
+whole generated answer. The existing single correction retry remains unchanged.
+Six new failing bound cases were observed before the minimal fix. The security
+audit also covers duplicate IDs, blank text, non-READY and cross-workspace
+evidence, provider bracket labels, and changing output shape on retry. These
+checks enforce structure and provenance, not semantic entailment of every claim.
 
 ### Learning Task 5 revision: Ground LEARN and CHECK with the shared block contract
 
