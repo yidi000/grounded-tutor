@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import perf_counter
 from uuid import UUID, uuid4
@@ -124,6 +125,8 @@ class ChatService:
         message: str,
         conversation_id: UUID | None,
         idempotency_key: str,
+        *,
+        before_persist: Callable[[], None] | None = None,
     ) -> ChatResult:
         failed = False
         try:
@@ -170,7 +173,7 @@ class ChatService:
         error = None
         try:
             result = await self._ask(
-                workspace_id, message, conversation_id, idempotency_key, dataset_id, trace
+                workspace_id, message, conversation_id, idempotency_key, dataset_id, trace, before_persist
             )
         except BaseException as caught:  # noqa: BLE001 - release the claim on cancellation too.
             error = caught
@@ -248,6 +251,7 @@ class ChatService:
         idempotency_key: str,
         dataset_id: str,
         trace: dict,
+        before_persist: Callable[[], None] | None = None,
     ) -> ChatResult:
         if conversation_id is not None and not self._chats.conversation_belongs_to_workspace(
             workspace_id, conversation_id
@@ -262,7 +266,7 @@ class ChatService:
             raise ChatPersistenceError()
         if not ready_sources:
             return self._persist(
-                workspace_id, conversation_id, message, idempotency_key, _insufficient()
+                workspace_id, conversation_id, message, idempotency_key, _insufficient(), before_persist
             )
 
         external_failure = False
@@ -308,7 +312,7 @@ class ChatService:
         }
         if not filtered_chunks:
             return self._persist(
-                workspace_id, conversation_id, message, idempotency_key, _insufficient()
+                workspace_id, conversation_id, message, idempotency_key, _insufficient(), before_persist
             )
 
         request = GenerationRequest("ASK", message, tuple(filtered_chunks))
@@ -333,7 +337,7 @@ class ChatService:
                     message, tuple(filtered_chunks), ready_chunks, trace
                 )
 
-        return self._persist(workspace_id, conversation_id, message, idempotency_key, answer)
+        return self._persist(workspace_id, conversation_id, message, idempotency_key, answer, before_persist)
 
     async def _retry_generation(
         self,
@@ -369,7 +373,11 @@ class ChatService:
         message: str,
         idempotency_key: str,
         answer: GroundedAnswer,
+        before_persist: Callable[[], None] | None = None,
     ) -> ChatResult:
+        # The orchestration callback only stages ORM changes in this same transaction.
+        if before_persist is not None:
+            before_persist()
         persisted = self._chats.persist_exchange(
             workspace_id=workspace_id,
             conversation_id=conversation_id,

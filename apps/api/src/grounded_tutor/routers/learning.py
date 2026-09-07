@@ -4,7 +4,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from grounded_tutor.dependencies import get_check_service, get_lesson_service
+from grounded_tutor.dependencies import get_check_service, get_lesson_service, get_orchestrator
+from grounded_tutor.domain.orchestration import ActivityCommand, ActivityView
 from grounded_tutor.domain.schemas import ApiErrorResponse
 from grounded_tutor.domain.teaching import (
     CheckAnswerRequest,
@@ -19,6 +20,7 @@ from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, learning_er
 from grounded_tutor.services.checks import CheckService
 from grounded_tutor.services.learning_context import LearningConflictError, LearningNotFoundError
 from grounded_tutor.services.lessons import LessonService
+from grounded_tutor.services.orchestrator import Orchestrator
 
 router = APIRouter(
     prefix="/api/workspaces/{workspace_id}/learning",
@@ -28,6 +30,7 @@ router = APIRouter(
         **{code: {"model": ApiErrorResponse} for code in (404, 409, 422, 500, 502)},
     },
 )
+Activities = Annotated[Orchestrator, Depends(get_orchestrator)]
 Lessons = Annotated[LessonService, Depends(get_lesson_service)]
 Checks = Annotated[CheckService, Depends(get_check_service)]
 public_errors = partial(
@@ -75,3 +78,21 @@ async def continue_check(
 ):
     with public_errors():
         return await service.continue_after_skip(workspace_id, assessment_id, payload)
+
+
+@router.get("/activity", response_model=ActivityView)
+def activity(workspace_id: UUID, service: Activities):
+    with public_errors():
+        return service.view(workspace_id)
+
+
+@router.post("/activity/pause", response_model=ActivityView)
+async def pause(workspace_id: UUID, payload: ActivityCommand, service: Activities):
+    with public_errors():
+        return await service.pause(workspace_id, payload)
+
+
+@router.post("/activity/resume", response_model=ActivityView)
+async def resume(workspace_id: UUID, payload: ActivityCommand, service: Activities):
+    with public_errors():
+        return await service.resume(workspace_id, payload)

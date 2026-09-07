@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy.exc import SQLAlchemyError
 
-from grounded_tutor.dependencies import get_chat_service
+from grounded_tutor.dependencies import get_orchestrator
 from grounded_tutor.domain.answers import SimpleSuggestedAction
 from grounded_tutor.domain.schemas import (
     ApiErrorResponse,
@@ -16,11 +17,13 @@ from grounded_tutor.repositories.chat import ChatConversationNotFoundError, Chat
 from grounded_tutor.repositories.sources import SourcePersistenceError
 from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, api_error, parse_uuid
 from grounded_tutor.services.chat import (
-    ChatService,
     ChatWorkspaceNotFoundError,
     ExternalChatServiceError,
 )
 from grounded_tutor.services.idempotency import IdempotencyInProgress, IdempotencyKeyReused
+from grounded_tutor.services.learning_context import LearningConflictError, LearningNotFoundError
+from grounded_tutor.services.orchestrator import Orchestrator
+from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/chat", tags=["chat"])
 
@@ -37,13 +40,13 @@ ERROR_RESPONSES = {
 @router.get("/history", response_model=ChatHistoryResponse, responses=ERROR_RESPONSES)
 def history(
     workspace_id: str,
-    service: Annotated[ChatService, Depends(get_chat_service)],
+    service: Annotated[Orchestrator, Depends(get_orchestrator)],
 ) -> ChatHistoryResponse:
     try:
         return service.history(parse_uuid(workspace_id, "workspace_not_found"))
     except ChatWorkspaceNotFoundError:
         api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
-    except (ChatPersistenceError, SourcePersistenceError):
+    except (ChatPersistenceError, SourcePersistenceError, SQLAlchemyError):
         api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
@@ -51,10 +54,10 @@ def history(
 async def ask(
     workspace_id: str,
     payload: ChatRequest,
-    service: Annotated[ChatService, Depends(get_chat_service)],
+    service: Annotated[Orchestrator, Depends(get_orchestrator)],
 ) -> ChatResponse:
     try:
-        result = await service.ask(
+        result = await service.handle_message(
             parse_uuid(workspace_id, "workspace_not_found"),
             payload.message,
             payload.conversation_id,
@@ -62,12 +65,18 @@ async def ask(
         )
     except (ChatWorkspaceNotFoundError, ChatConversationNotFoundError):
         api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
-    except (ChatPersistenceError, SourcePersistenceError):
+    except (ChatPersistenceError, SourcePersistenceError, SQLAlchemyError):
         api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
     except IdempotencyKeyReused:
         api_error(status.HTTP_409_CONFLICT, "idempotency_key_reused")
     except IdempotencyInProgress:
         api_error(status.HTTP_409_CONFLICT, "idempotency_in_progress")
+    except WorkspaceIngestionBusyError:
+        api_error(status.HTTP_409_CONFLICT, "workspace_ingestion_busy")
+    except LearningConflictError:
+        api_error(status.HTTP_409_CONFLICT, "learning_conflict")
+    except LearningNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "learning_not_found")
     except ExternalChatServiceError:
         api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
 
@@ -76,6 +85,7 @@ async def ask(
             SimpleSuggestedAction(type="add_material"),
             SimpleSuggestedAction(type="rephrase"),
         )
+        + result.suggested_actions
         if result.answer.status == "insufficient_material"
         else result.suggested_actions
     )

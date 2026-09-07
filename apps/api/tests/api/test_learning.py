@@ -159,3 +159,81 @@ def test_demo_blocks_learning_writes(demo_client):
         f"/checks/{uuid4()}/continue",
     ):
         assert demo_client.post(base + suffix, json={}).status_code == 403
+
+
+def test_chat_detour_exposes_resume_in_response_history_and_activity(
+    client, teaching_api, fake_generation
+):
+    url, concepts = teaching_api
+    lesson = client.post(
+        f"{url}/concepts/{concepts[0]}/lessons",
+        json={"depth": "deeper", "idempotency_key": "lesson"},
+    ).json()
+    chat_url = url.removesuffix("/learning") + "/chat"
+    fake_generation.responses = [
+        GeneratedAnswer(
+            blocks=(
+                GeneratedBlock(
+                    id="a", kind="answer", text="sum divided by count", chunk_ids=("chunk",)
+                ),
+            )
+        )
+    ]
+    answer = client.post(chat_url, json={"message": "Why?", "idempotency_key": "detour"})
+    assert answer.status_code == 200
+    action = next(a for a in answer.json()["suggested_actions"] if a["type"] == "resume_activity")
+    current = client.get(url + "/activity")
+    assert current.status_code == 200 and current.json()["snapshot"]["active_mode"] == "ASK"
+    assert current.json()["lesson"] == lesson
+    history = client.get(chat_url + "/history").json()
+    assert action in history["exchanges"][-1]["response"]["suggested_actions"]
+    resumed = client.post(
+        url + "/activity/resume",
+        json={"checkpoint": action["checkpoint"], "idempotency_key": "resume"},
+    )
+    assert resumed.status_code == 200 and resumed.json()["snapshot"]["active_mode"] == "LEARN"
+    assert resumed.json()["lesson"] == lesson and resumed.json()["resume_action"] is None
+    assert "answer_key" not in resumed.text
+    assert all(
+        a["type"] != "resume_activity"
+        for a in client.get(chat_url + "/history").json()["exchanges"][-1]["response"][
+            "suggested_actions"
+        ]
+    )
+
+
+def test_insufficient_ask_keeps_resume_action_and_pause_requires_checkpoint(
+    client, teaching_api, fake_generation
+):
+    url, concepts = teaching_api
+    client.post(f"{url}/concepts/{concepts[0]}/lessons", json={"idempotency_key": "lesson"})
+    activity = client.get(url + "/activity").json()
+    assert (
+        client.post(
+            url + "/activity/pause", json={"checkpoint": "stale", "idempotency_key": "stale"}
+        ).status_code
+        == 409
+    )
+    fake_generation.responses = [GeneratedAnswer(blocks=())] * 2
+    response = client.post(
+        url.removesuffix("/learning") + "/chat",
+        json={"message": "Unsupported?", "idempotency_key": "ask"},
+    )
+    assert response.json()["status"] == "insufficient_material"
+    assert {a["type"] for a in response.json()["suggested_actions"]} == {
+        "add_material",
+        "rephrase",
+        "resume_activity",
+    }
+    payload = {"checkpoint": activity["checkpoint"], "idempotency_key": "pause"}
+    assert client.post(url + "/activity/pause", json=payload).status_code == 200
+    assert (
+        client.post(url + "/activity/resume", json={**payload, "draft_answer": "no"}).status_code
+        == 422
+    )
+
+
+def test_demo_blocks_pause_and_resume(demo_client):
+    url = f"/api/workspaces/{uuid4()}/learning/activity"
+    for action in ("pause", "resume"):
+        assert demo_client.post(url + "/" + action, json={}).status_code == 403

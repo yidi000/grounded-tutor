@@ -124,3 +124,14 @@ def get_check_service(
 ):
     from grounded_tutor.services.checks import CheckService
     return CheckService(session,fastgpt,generation,locks)
+
+
+def get_orchestrator(
+    session: Annotated[Session, Depends(get_session)],
+    chat: Annotated[ChatService, Depends(get_chat_service)],
+    fastgpt: Annotated[FastGPTPort, Depends(get_fastgpt)],
+    generation: Annotated[GenerationPort, Depends(get_generation)],
+    locks: Annotated[WorkspaceLockRegistry, Depends(get_source_locks)],
+):
+    from grounded_tutor.services.orchestrator import Orchestrator
+    return Orchestrator(session,chat,fastgpt,generation,locks)

@@ -314,7 +314,7 @@ Implementation notes: see `docs/lessons-and-checks.md`. Includes persisted depth
 - Modify: `apps/api/src/grounded_tutor/services/chat.py`
 - Create: `apps/api/tests/services/test_orchestrator.py`
 
-- [ ] **Step 1: Write the failing resume test**
+- [x] **Step 1: Write the failing resume test**
 
 ```python
 @pytest.mark.asyncio
@@ -337,28 +337,30 @@ async def test_question_during_check_returns_resume_action(orchestrator, active_
     assert resumed.checkpoint == active_check.checkpoint
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_orchestrator.py -q`
 
 Expected: FAIL because Orchestrator does not exist.
 
-- [ ] **Step 3: Implement activity stack rules**
+- [x] **Step 3: Implement activity stack rules**
 
 Keep the four persisted modes from Task 1: a diagnostic is a CHECK-mode assessment whose checkpoint kind is `diagnostic`. During a diagnostic assessment, an immediate CHECK, or LEARN, a direct content question suspends the activity, calls ASK, and returns `ResumeActivityAction(type="resume_activity", label="继续第 2 题", checkpoint="diagnostic-question-2")` with the actual label and checkpoint. A page close persists only the last completed checkpoint; an unsubmitted answer never changes mastery. Workspace switching leaves the original ActivityState untouched. Resume loads the exact diagnostic question, Concept, or check question and does not regenerate it.
 
-- [ ] **Step 4: Verify all cross-scenario transitions**
+- [x] **Step 4: Verify all cross-scenario transitions**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_orchestrator.py -q`
 
 Expected: diagnostic CHECK checkpoint→ASK→same diagnostic checkpoint, immediate CHECK→ASK→same check, LEARN→ASK→same concept, skip, page reload, Workspace switch, and failed-handler rollback tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
 git commit -m "feat: add resumable tutor orchestration"
 ```
+
+Implementation notes: see `docs/activity-resume.md`. Includes atomic ASK detours, exact saved activity recovery, idempotent pause/resume, Workspace isolation, and READY evidence validation before resume. Independent review found no reproducible correctness issues; backend regression: 913 passed, 5 skipped. Desktop controls remain Task 7; live FastGPT learning contracts are not yet verified.
 
 ### Task 7: Add learning UI and eight learning evaluation cases
 
