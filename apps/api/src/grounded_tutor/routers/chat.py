@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, status
 
 from grounded_tutor.dependencies import get_chat_service
 from grounded_tutor.domain.answers import SimpleSuggestedAction
-from grounded_tutor.domain.schemas import ApiErrorResponse, ChatRequest, ChatResponse
+from grounded_tutor.domain.schemas import (
+    ApiErrorResponse,
+    ChatHistoryResponse,
+    ChatRequest,
+    ChatResponse,
+)
 from grounded_tutor.repositories.chat import ChatConversationNotFoundError, ChatPersistenceError
 from grounded_tutor.repositories.sources import SourcePersistenceError
 from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, api_error, parse_uuid
@@ -25,6 +30,19 @@ ERROR_RESPONSES = {
     500: {"model": ApiErrorResponse, "description": "Local persistence failed."},
     502: {"model": ApiErrorResponse, "description": "External service failed."},
 }
+
+
+@router.get("/history", response_model=ChatHistoryResponse, responses=ERROR_RESPONSES)
+def history(
+    workspace_id: str,
+    service: Annotated[ChatService, Depends(get_chat_service)],
+) -> ChatHistoryResponse:
+    try:
+        return service.history(parse_uuid(workspace_id, "workspace_not_found"))
+    except ChatWorkspaceNotFoundError:
+        api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
+    except (ChatPersistenceError, SourcePersistenceError):
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
 
 
 @router.post("", response_model=ChatResponse, responses=ERROR_RESPONSES)

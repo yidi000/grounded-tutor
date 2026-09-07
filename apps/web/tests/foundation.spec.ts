@@ -1,10 +1,45 @@
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { fileURLToPath } from "node:url";
+
+for (const filename of ["slides.pptx", "workbook.xlsx"]) {
+  test(`local ${filename} upload review accept and cited ASK`, async ({ page }, testInfo) => {
+    test.skip(!testInfo.project.name.startsWith("local-"));
+    await page.goto("/");
+    await createWorkspace(page, `${filename} ${testInfo.project.name}`);
+    await page.getByRole("button", { name: "＋ 添加资料" }).click();
+    const dialog = page.getByRole("dialog", { name: "添加学习资料" });
+    await dialog.locator('input[type="file"]').setInputFiles(fileURLToPath(new URL(`../../api/tests/fixtures/${filename}`, import.meta.url)));
+    await dialog.getByRole("button", { name: "查看预计片段" }).click();
+    await expect(dialog.getByText("本地估算")).toBeVisible();
+    await dialog.getByRole("button", { name: "确认处理" }).click();
+    await expect(dialog.getByText("实际处理结果")).toBeVisible();
+    await dialog.getByRole("button", { name: "接受并用于问答" }).click();
+    await dialog.getByRole("button", { name: "完成" }).click();
+    await page.reload();
+    await page.getByLabel("向资料提问").fill("What does this material explain?");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.getByRole("button", { name: `引用 1：${filename}` }).click();
+    await expect(page.getByRole("complementary", { name: "上下文" })).toContainText(filename);
+    await page.reload();
+    await page.getByRole("button", { name: `引用 1：${filename}` }).click();
+    await expect(page.getByRole("complementary", { name: "上下文" })).toContainText(filename);
+    await expectDesktopContract(page);
+  });
+}
 
 test("local paste review accept and keyboard-open cited ASK", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("local-"));
   await page.goto("/");
   await createWorkspace(page, `Intro Statistics ${testInfo.project.name}`);
-  await pasteAndAccept(page, "Week 1 notes", "Mean is an average.");
+  let uploads = 0;
+  await page.route("**/sources/text", async (route) => {
+    uploads += 1;
+    const response = await route.fetch();
+    const result = await response.json();
+    await route.fulfill({ response, json: { ...result, processed_preview: { ...result.processed_preview, items: [] } } });
+  });
+  await pasteAndAccept(page, "Week 1 notes", "Mean is an average.", testInfo);
+  expect(uploads).toBe(1);
 
   const composer = page.getByLabel("向资料提问");
   await expect(composer).toBeEnabled();
@@ -26,6 +61,19 @@ test("local paste review accept and keyboard-open cited ASK", async ({ page }, t
     path: testInfo.outputPath(`grounded-tutor-task11-${testInfo.project.name}.png`),
     fullPage: false,
   });
+
+  const originalTitle = `Intro Statistics ${testInfo.project.name}`;
+  await createWorkspace(page, `Empty history ${testInfo.project.name}`);
+  await expect(page.getByRole("button", { name: "引用 1：Week 1 notes" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: `Empty history ${testInfo.project.name}` })).toBeVisible();
+  await page.getByRole("navigation", { name: "学习主题" }).getByText(originalTitle, { exact: true }).click();
+  await page.getByRole("button", { name: "引用 1：Week 1 notes" }).click();
+  await expect(page.getByRole("complementary", { name: "上下文" })).toContainText("Mean is an average.");
+  await page.reload();
+  await page.getByRole("button", { name: "引用 1：Week 1 notes" }).click();
+  await expect(page.getByRole("complementary", { name: "上下文" })).toContainText("Mean is an average.");
+  await page.screenshot({ path: testInfo.outputPath("restored-history.png") });
 });
 
 test("demo opens fixed citation and performs no write request", async ({ page }, testInfo) => {
@@ -71,7 +119,7 @@ async function createWorkspace(page: Page, title: string) {
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 }
 
-async function pasteAndAccept(page: Page, name: string, content: string) {
+async function pasteAndAccept(page: Page, name: string, content: string, testInfo: TestInfo) {
   await page.getByRole("button", { name: "粘贴文本", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "添加学习资料" });
   await dialog.getByRole("button", { name: "粘贴文本", exact: true }).click();
@@ -81,6 +129,12 @@ async function pasteAndAccept(page: Page, name: string, content: string) {
   await expect(dialog.getByText("本地估算")).toBeVisible();
   await dialog.getByRole("button", { name: "确认处理" }).click();
   await expect(dialog.getByText("实际处理结果")).toBeVisible();
+  await expect(dialog.getByText(/可能仍在处理/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "接受并用于问答" })).toBeDisabled();
+  await expectDesktopContract(page);
+  await page.screenshot({ path: testInfo.outputPath("pending-source-preview.png") });
+  await dialog.getByRole("button", { name: "刷新处理结果" }).click();
+  await expect(dialog.getByText(content, { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "接受并用于问答" }).click();
   await expect(dialog.getByText("资料已准备好")).toBeVisible();
   await dialog.getByRole("button", { name: "完成" }).click();

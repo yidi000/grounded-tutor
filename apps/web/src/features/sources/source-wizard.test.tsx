@@ -44,6 +44,28 @@ const capabilities: SourceIngestionCapabilities = {
 };
 
 describe("SourceWizard", () => {
+  it.each([{ items: [] }, { items: [{ position: 1, q: "  ", a: "\n", q_truncated: false, a_truncated: false }] }])("refreshes an empty preview without uploading again and recovers from read errors: %j", async ({ items }) => {
+    const user = userEvent.setup();
+    const actual = { authority: "actual", source_id: source.id, source_name: source.name, items, limit: 30 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(actual), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: { code: "external_service_error" } }), { status: 502 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...actual, items: [{ position: 1, q: "资料内容", a: "", q_truncated: false, a_truncated: false }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...source, status: "ready" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SourceWizard workspaceId={source.workspace_id} capabilities={capabilities} open existingSource={source} intent="review" onClose={vi.fn()} onChanged={vi.fn()} />);
+    expect(await screen.findByRole("button", { name: "接受并用于问答" })).toBeDisabled();
+    expect(screen.getByText(/可能仍在处理/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "刷新处理结果" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("当前无法完成");
+    await user.click(screen.getByRole("button", { name: "返回重试" }));
+    expect(await screen.findByText("资料内容")).toBeVisible();
+    expect(screen.getByRole("button", { name: "接受并用于问答" })).toBeEnabled();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(Array(3).fill(`/api/workspaces/${source.workspace_id}/sources/${source.id}/processed-preview`));
+    await user.click(screen.getByRole("button", { name: "接受并用于问答" }));
+    expect(await screen.findByText("资料已准备好")).toBeVisible();
+  });
+
   it("keeps the simple settings path primary and explains advanced fields inline", async () => {
     const user = userEvent.setup();
     render(

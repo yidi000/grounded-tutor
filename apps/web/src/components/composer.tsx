@@ -6,15 +6,16 @@ type ComposerProps = {
   mode: AppMode;
   onAddSource?: () => void;
   ready?: boolean;
+  blocked?: boolean;
   onSubmit?: (question: string) => Promise<void>;
 };
 
-export function Composer({ mode, onAddSource, ready = false, onSubmit }: ComposerProps) {
+export function Composer({ mode, onAddSource, ready = false, blocked = false, onSubmit }: ComposerProps) {
   const isDemo = mode === "demo_read_only";
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState(false);
-  const enabled = !isDemo && ready && Boolean(onSubmit);
+  const enabled = !isDemo && ready && !blocked && Boolean(onSubmit);
 
   async function send() {
     const question = draft.trim();

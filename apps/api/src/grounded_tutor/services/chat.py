@@ -10,6 +10,7 @@ from grounded_tutor.adapters.generation import (
     InvalidGenerationOutput,
 )
 from grounded_tutor.domain.answers import GroundedAnswer
+from grounded_tutor.domain.schemas import ChatHistoryResponse
 from grounded_tutor.repositories.chat import (
     ChatConversationNotFoundError,
     ChatPersistenceError,
@@ -54,6 +55,11 @@ class ChatService:
         self._chats = chats
         self._fastgpt = fastgpt
         self._generation = generation
+
+    def history(self, workspace_id: UUID) -> ChatHistoryResponse:
+        if self._sources.get_workspace_dataset_id(workspace_id) is None:
+            raise ChatWorkspaceNotFoundError
+        return self._chats.history(workspace_id)
 
     async def ask(
         self,

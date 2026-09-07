@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
@@ -505,6 +505,7 @@ describe("App", () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/chat/history")) return Response.json({ exchanges: [] });
       requests.push({ url, init });
       if (url === "/api/capabilities/source-ingestion") return Response.json({ accepted_extensions: [".txt"], max_upload_bytes: 10_000, settings: [], workspace_models: [], read_only_demo: false });
       if (url === "/api/workspaces" && init?.method === "POST") return Response.json({ id: newWorkspaceId, title: "Probability", source_count: 0, ready_source_count: 0, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-04T00:00:00Z", updated_at: "2026-09-04T00:00:00Z" });
@@ -519,6 +520,7 @@ describe("App", () => {
     render(<App mode="local" />);
     await screen.findByRole("heading", { name: "Intro Statistics" });
     const input = screen.getByLabelText("向资料提问");
+    await waitFor(() => expect(input).toBeEnabled());
     await user.type(input, "What is a mean?");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
@@ -547,6 +549,7 @@ describe("App", () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.endsWith("/chat/history")) return Response.json({ exchanges: [] });
       requests.push({ url, init });
       if (url === "/api/capabilities/source-ingestion") return Response.json({ accepted_extensions: [".txt"], max_upload_bytes: 10_000, settings: [], workspace_models: [], read_only_demo: false });
       if (url === "/api/workspaces") return Response.json([
@@ -562,6 +565,7 @@ describe("App", () => {
     render(<App mode="local" />);
     await screen.findByRole("heading", { name: "Workspace A" });
     const input = screen.getByLabelText("向资料提问");
+    await waitFor(() => expect(input).toBeEnabled());
     await user.type(input, "Question for A");
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(requests.filter(({ url }) => url === `/api/workspaces/${firstId}/chat`)).toHaveLength(1);
@@ -573,7 +577,7 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Workspace B" })).toBeVisible();
     const inputB = screen.getByLabelText("向资料提问");
     expect(inputB).toHaveValue("");
-    expect(inputB).toBeEnabled();
+    await waitFor(() => expect(inputB).toBeEnabled());
     await user.type(inputB, "Question for B");
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("Answer from B.")).toBeVisible();

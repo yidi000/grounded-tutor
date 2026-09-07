@@ -37,6 +37,52 @@ def _generated(
     )
 
 
+def test_history_restores_ordered_exchanges_and_citations_without_external_calls(
+    client, seeded_workspace, api_session_factory, fake_fastgpt, fake_generation
+):
+    source = _seed_ready_source(api_session_factory, seeded_workspace)
+    fake_fastgpt.search_results_override = (
+        RetrievedChunk("chunk-ready", source.collection_id, "private", "均值", "均值是平均数。", 0.9),
+    )
+    fake_generation.responses = [_generated(), _generated(), _generated()]
+    url = f"/api/workspaces/{seeded_workspace.id}/chat"
+    responses = []
+    for index in range(3):
+        result = client.post(url, json={
+            "message": f"问题 {index}", "idempotency_key": f"history-{index}",
+            "conversation_id": responses[0]["conversation_id"] if index == 1 else None,
+        })
+        assert result.status_code == 200
+        responses.append(result.json())
+    # SQLite timestamps can tie; message UUIDs must not determine turn order.
+    with api_session_factory() as session:
+        from datetime import UTC, datetime
+        for message in session.scalars(select(Message)):
+            message.created_at = datetime(2026, 9, 7, tzinfo=UTC)
+        session.commit()
+    calls = len(fake_fastgpt.search_calls), len(fake_generation.calls)
+    history = client.get(url + "/history")
+    assert history.status_code == 200
+    assert history.json() == {"exchanges": [
+        {"question": f"问题 {i}", "response": response, "legacy_content": None}
+        for i, response in enumerate(responses)
+    ]}
+    assert (len(fake_fastgpt.search_calls), len(fake_generation.calls)) == calls
+
+
+def test_history_is_workspace_scoped_and_distinguishes_empty_from_missing(client, seeded_workspace):
+    other = client.post("/api/workspaces", json={"title": "Other"}).json()["id"]
+    client.post(f"/api/workspaces/{seeded_workspace.id}/chat", json={
+        "message": "Only in A", "idempotency_key": "history-a",
+    })
+    assert client.get(f"/api/workspaces/{other}/chat/history").json() == {"exchanges": []}
+    history = client.get(f"/api/workspaces/{seeded_workspace.id}/chat/history").json()
+    assert history["exchanges"][0]["response"]["status"] == "insufficient_material"
+    assert history["exchanges"][0]["response"]["suggested_actions"]
+    assert client.get(f"/api/workspaces/{uuid4()}/chat/history").status_code == 404
+    assert client.get("/api/workspaces/not-a-uuid/chat/history").status_code == 404
+
+
 def _seed_ready_source(api_session_factory, workspace: Workspace) -> Source:
     with api_session_factory() as session:
         source = Source(
@@ -318,3 +364,23 @@ def test_chat_openapi_documents_actual_public_error_responses(client: TestClient
 
     assert set(operation["responses"]) == {"200", "403", "404", "422", "500", "502"}
     assert "ApiErrorResponse" in json.dumps(operation)
+
+
+def test_history_keeps_legacy_text_and_redacts_broken_pairs(client, seeded_workspace, api_session_factory):
+    url = f"/api/workspaces/{seeded_workspace.id}/chat"
+    client.post(url, json={"message": "旧问题", "idempotency_key": "legacy-history"})
+    with api_session_factory() as session:
+        assistant = session.scalar(select(Message).where(Message.role == "assistant"))
+        assistant.content = "旧回答"
+        assistant.content_blocks = None
+        session.commit()
+    exchange = client.get(url + "/history").json()["exchanges"][0]
+    assert exchange["legacy_content"] == "旧回答"
+    assert exchange["response"]["citations"] == []
+    with api_session_factory() as session:
+        user = session.scalar(select(Message).where(Message.role == "user"))
+        session.delete(user)
+        session.commit()
+    response = client.get(url + "/history")
+    assert response.status_code == 500
+    assert "旧回答" not in response.text

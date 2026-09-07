@@ -4,5 +4,6 @@ import { afterEach, vi } from "vitest";
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   vi.unstubAllGlobals();
 });

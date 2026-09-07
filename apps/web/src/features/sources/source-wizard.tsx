@@ -44,7 +44,7 @@ function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "input": return { ...state, input: action.input, stage: "settings", error: null };
     case "settings": return { ...state, settings: action.settings };
-    case "stage": return { ...state, stage: action.stage, error: null };
+    case "stage": return { ...state, stage: action.stage, actual: action.stage === "processing" ? null : state.actual, error: null };
     case "estimated": return { ...state, stage: "estimate", estimate: action.estimate, error: null };
     case "processed": return { ...state, stage: "review", source: action.source, actual: action.actual, error: null };
     case "review": return { ...state, stage: "review", source: action.source, actual: action.actual, error: null };
@@ -98,6 +98,7 @@ export function SourceWizard({ workspaceId, capabilities, open, initialFile, exi
   const [textName, setTextName] = useState("学习笔记");
   const [text, setText] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const refreshingRef = useRef(false);
   const acceptingRef = useRef(false);
   const [accepting, setAccepting] = useState(false);
   const adjustingRef = useRef(false);
@@ -105,12 +106,16 @@ export function SourceWizard({ workspaceId, capabilities, open, initialFile, exi
   const dialogRef = useModal(open, onClose);
 
   async function loadActual(source: SourceResponse) {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
     dispatch({ type: "stage", stage: "processing" });
     try {
       const actual = await api.processedPreview(workspaceId, source.id);
       dispatch({ type: "review", source, actual });
     } catch (error) {
       dispatch({ type: "failed", error: publicError(error), resumeStage: "review" });
+    } finally {
+      refreshingRef.current = false;
     }
   }
 
@@ -223,6 +228,7 @@ export function SourceWizard({ workspaceId, capabilities, open, initialFile, exi
     setAdjusting(false);
   }
 
+  const actualItems = state.actual?.items.filter((item) => item.q.trim() || item.a.trim()) ?? [];
   const title = existingSource ? existingSource.name : "添加学习资料";
   return (
     <div className="dialog-backdrop" role="presentation" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }}>
@@ -250,7 +256,7 @@ export function SourceWizard({ workspaceId, capabilities, open, initialFile, exi
 
         {state.stage === "estimate" && state.estimate && <PreviewView title="预计片段" badge="本地估算" items={state.estimate.items.map((item) => item.text)} actions={<><button className="secondary-button" type="button" onClick={() => dispatch({ type: "stage", stage: "settings" })}>调整设置</button><button className="primary-button" type="button" onClick={process}>确认处理</button></>} />}
         {state.stage === "processing" && <div className="wizard-body processing-state" aria-live="polite"><span className="processing-mark" aria-hidden="true">···</span><h3>正在读取并整理资料</h3><p>完成后会先让你复核实际处理结果，不会自动用于问答。</p><button className="text-button" type="button" onClick={onClose}>关闭并稍后查看</button></div>}
-        {state.stage === "review" && state.actual && <PreviewView title="实际处理结果" badge={state.source?.status === "ready" ? "已就绪" : "待复核"} items={state.actual.items.map((item) => item.q ? `${item.q}\n${item.a}` : item.a)} actions={<><button className="secondary-button" type="button" disabled={adjusting} onClick={() => void adjustAndReplace()}>{adjusting ? "正在准备新版本" : "调整设置并重新处理"}</button>{state.source?.status === "review" ? <button className="primary-button" type="button" disabled={state.actual.items.length === 0 || accepting} onClick={accept}>{accepting ? "正在接受" : "接受并用于问答"}</button> : <button className="primary-button" type="button" onClick={onClose}>关闭</button>}</>} />}
+        {state.stage === "review" && state.actual && <PreviewView title="实际处理结果" badge={state.source?.status === "ready" ? "已就绪" : "待复核"} items={actualItems.map((item) => item.q ? `${item.q}\n${item.a}` : item.a)} actions={<>{actualItems.length === 0 && state.source && <button className="secondary-button" type="button" onClick={() => void loadActual(state.source!)}>刷新处理结果</button>}<button className="secondary-button" type="button" disabled={adjusting} onClick={() => void adjustAndReplace()}>{adjusting ? "正在准备新版本" : "调整设置并重新处理"}</button>{state.source?.status === "review" ? <button className="primary-button" type="button" disabled={actualItems.length === 0 || accepting} onClick={accept}>{accepting ? "正在接受" : "接受并用于问答"}</button> : <button className="primary-button" type="button" onClick={onClose}>关闭</button>}</>} />}
         {state.stage === "ready" && <div className="wizard-body ready-state"><span className="ready-mark" aria-hidden="true">✓</span><h3>资料已准备好</h3><p>{state.source?.name} 现在可以用于带引用的问答。</p><button className="primary-button" type="button" onClick={onClose}>完成</button></div>}
         {state.stage === "failed" && <div className="wizard-body failed-state" role="alert"><h3>这项操作没有完成</h3><p>{state.error}</p><div className="dialog-actions">{state.input && <button className="secondary-button" type="button" onClick={() => dispatch({ type: "stage", stage: "settings" })}>调整设置</button>}<button className="primary-button" type="button" onClick={retryFailure}>返回重试</button></div></div>}
       </section>
@@ -259,7 +265,7 @@ export function SourceWizard({ workspaceId, capabilities, open, initialFile, exi
 }
 
 function PreviewView({ title, badge, items, actions }: { title: string; badge: string; items: string[]; actions: React.ReactNode }) {
-  return <div className="wizard-body preview-view"><div className="preview-heading"><h3>{title}</h3><span className="status-label">{badge}</span></div><p>{title === "预计片段" ? "这是浏览器中的估算，实际结果以处理后复核为准。" : "检查系统实际读到的内容，确认后才会用于问答。"}</p><div className="preview-list">{items.length ? items.map((item, index) => <article key={`${index}-${item.slice(0, 12)}`}><span>片段 {index + 1}</span><p>{item}</p></article>) : <p className="form-error">没有读到可用内容，请调整设置或更换资料。</p>}</div><div className="dialog-actions">{actions}</div></div>;
+  return <div className="wizard-body preview-view"><div className="preview-heading"><h3>{title}</h3><span className="status-label">{badge}</span></div><p>{title === "预计片段" ? "这是浏览器中的估算，实际结果以处理后复核为准。" : "检查系统实际读到的内容，确认后才会用于问答。"}</p><div className="preview-list">{items.length ? items.map((item, index) => <article key={`${index}-${item.slice(0, 12)}`}><span>片段 {index + 1}</span><p>{item}</p></article>) : <p role="status">{title === "实际处理结果" ? "暂时还没有可用片段，资料可能仍在处理。请稍后刷新处理结果；若持续为空，再调整设置或更换资料。" : "没有读到可用内容，请调整设置或更换资料。"}</p>}</div><div className="dialog-actions">{actions}</div></div>;
 }
 
 function publicError(error: unknown) {

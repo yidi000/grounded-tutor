@@ -1538,3 +1538,18 @@ Report fixture provenance, no-write evidence, Pages workflow permissions, releas
 - [ ] The two desktop viewports have no page-level horizontal scroll and retain a central surface of at least 640px.
 - [ ] Secret and public-file scans contain no private key, Dataset ID, App ID, real student material, or account identifier.
 - [ ] Git status is clean before publication.
+
+
+## Phase 1 addendum: ASK history restoration (2026-09-07)
+
+User-approved final Phase 1 scope, after completed Task 11:
+
+- Restore persisted questions, structured answers, and citation snapshots after refresh.
+- Keep the selected workspace in the URL and load its history when switching.
+- Isolate histories, citation panels, loading, and late ASK results by workspace.
+- Continue the latest persisted conversation; provide explicit loading/error/retry states.
+
+Implemented with a read-only workspace history endpoint and the existing TanStack
+Query cache. SQLite remains the source of truth. No schema migration, dependency,
+model call, mobile work, or image support is added. History search, deletion,
+pagination, and model conversational memory are outside this addendum.

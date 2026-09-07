@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from grounded_tutor.domain.answers import GroundedAnswer
+from grounded_tutor.domain.answers import GroundedAnswer, SimpleSuggestedAction
 from grounded_tutor.domain.models import Conversation, Message
+from grounded_tutor.domain.schemas import ChatHistoryExchange, ChatHistoryResponse, ChatResponse
 
 
 class ChatPersistenceError(RuntimeError):
@@ -31,6 +32,54 @@ class PersistedChat:
 class ChatRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
+
+    def history(self, workspace_id: UUID) -> ChatHistoryResponse:
+        failed = False
+        try:
+            # ponytail: P0 is SQLite; rowid preserves insertion order when timestamps
+            # tie. Add an explicit sequence and pagination before PostgreSQL/large histories.
+            messages = self._session.scalars(
+                select(Message)
+                .join(Conversation)
+                .where(Conversation.workspace_id == workspace_id, Message.mode == "ask")
+                .order_by(literal_column("messages.rowid"))
+            )
+            questions: dict[UUID, str] = {}
+            exchanges = []
+            for message in messages:
+                if message.role == "user":
+                    questions[message.conversation_id] = message.content
+                elif message.role == "assistant":
+                    insufficient = (
+                        message.content == "insufficient_material" and not message.content_blocks
+                    )
+                    exchanges.append(
+                        ChatHistoryExchange(
+                            question=questions.pop(message.conversation_id),
+                            response=ChatResponse(
+                                conversation_id=message.conversation_id,
+                                message_id=message.id,
+                                status="insufficient_material" if insufficient else "ok",
+                                answer_blocks=message.content_blocks or [],
+                                citations=message.citations if message.content_blocks else [],
+                                suggested_actions=(
+                                    SimpleSuggestedAction(type="add_material"),
+                                    SimpleSuggestedAction(type="rephrase"),
+                                )
+                                if insufficient
+                                else (),
+                            ),
+                            legacy_content=message.content
+                            if message.content_blocks is None and not insufficient
+                            else None,
+                        )
+                    )
+            return ChatHistoryResponse(exchanges=tuple(exchanges))
+        except (SQLAlchemyError, ValueError, KeyError):
+            self._rollback()
+            failed = True
+        if failed:
+            raise ChatPersistenceError()
 
     def persist_exchange(
         self,
@@ -62,9 +111,7 @@ class ChatRepository:
                     if answer.status == "ok"
                     else answer.status
                 ),
-                content_blocks=[
-                    block.model_dump(mode="json") for block in answer.answer_blocks
-                ],
+                content_blocks=[block.model_dump(mode="json") for block in answer.answer_blocks],
                 citations=[citation.model_dump(mode="json") for citation in answer.citations],
                 idempotency_key=idempotency_key,
             )
@@ -82,9 +129,7 @@ class ChatRepository:
             raise ChatPersistenceError()
         return result
 
-    def conversation_belongs_to_workspace(
-        self, workspace_id: UUID, conversation_id: UUID
-    ) -> bool:
+    def conversation_belongs_to_workspace(self, workspace_id: UUID, conversation_id: UUID) -> bool:
         persistence_failed = False
         try:
             belongs = self._session.scalar(
@@ -100,9 +145,7 @@ class ChatRepository:
             raise ChatPersistenceError()
         return belongs is not None
 
-    def _conversation(
-        self, workspace_id: UUID, conversation_id: UUID | None
-    ) -> Conversation:
+    def _conversation(self, workspace_id: UUID, conversation_id: UUID | None) -> Conversation:
         if conversation_id is None:
             conversation = Conversation(workspace_id=workspace_id)
             self._session.add(conversation)

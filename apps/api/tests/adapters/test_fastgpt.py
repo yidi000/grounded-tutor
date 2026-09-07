@@ -15,6 +15,50 @@ from grounded_tutor.adapters.fastgpt import (
 
 @pytest.mark.asyncio
 @respx.mock
+@pytest.mark.parametrize(
+    "scores",
+    [
+        [{"type": "embedding", "value": 0.59}, {"type": "rrf", "value": 0.016}],
+        [],
+        [{"value": True}],
+        [{"value": "0.9"}],
+        [{"value": 0.9}, {"value": None}],
+    ],
+)
+async def test_search_maps_cloud_list_and_score_records(scores) -> None:
+    respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "code": 200,
+                "data": {
+                    "list": [
+                        {
+                            "id": "cloud-chunk",
+                            "collectionId": "collection-1",
+                            "sourceName": "slides.pptx",
+                            "q": "Citations connect answers to evidence.",
+                            "score": scores,
+                        }
+                    ]
+                },
+            },
+        )
+    )
+    async with FastGPTClient("https://fastgpt.test", "secret") as client:
+        if scores and scores[0].get("type") == "embedding":
+            results = await client.search(SearchRequest("dataset-1", "citations"))
+            assert results[0].chunk_id == "cloud-chunk"
+            assert results[0].a == ""
+            assert results[0].score == 0.59
+        else:
+            with pytest.raises(ExternalServiceError) as caught:
+                await client.search(SearchRequest("dataset-1", "citations"))
+            assert caught.value.category == "malformed_response"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_search_maps_fastgpt_results() -> None:
     route = respx.post("https://fastgpt.test/api/core/dataset/searchTest").mock(
         return_value=httpx.Response(
@@ -75,6 +119,8 @@ async def test_create_dataset_maps_optional_models_and_omits_blank_models() -> N
     assert _request_json(request) == {
         "type": "dataset",
         "name": "Statistics",
+        "intro": "",
+        "avatar": "",
         "vectorModel": "embedding-3",
         "vlmModel": "vision-1",
     }

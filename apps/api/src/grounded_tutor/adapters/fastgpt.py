@@ -175,7 +175,7 @@ class FastGPTClient:
         agent_model: str | None = None,
         vlm_model: str | None = None,
     ) -> DatasetRef:
-        payload: dict[str, Any] = {"type": "dataset", "name": name}
+        payload: dict[str, Any] = {"type": "dataset", "name": name, "intro": "", "avatar": ""}
         for field, value in (
             ("vectorModel", vector_model),
             ("agentModel", agent_model),
@@ -306,7 +306,8 @@ class FastGPTClient:
                 payload["datasetSearchExtensionModel"] = request.extension_model
             if request.extension_background:
                 payload["datasetSearchExtensionBg"] = request.extension_background
-        data = _list(await self._request("POST", "/api/core/dataset/searchTest", json=payload))
+        response = await self._request("POST", "/api/core/dataset/searchTest", json=payload)
+        data = _list(response.get("list") if isinstance(response, dict) else response)
         if len(data) > request.limit:
             _malformed()
         return [
@@ -315,8 +316,8 @@ class FastGPTClient:
                 collection_id=_required_string(_object(item), "collectionId"),
                 source_name=_required_string(_object(item), "sourceName"),
                 q=_required_text(_object(item), "q"),
-                a=_required_text(_object(item), "a"),
-                score=_required_number(_object(item), "score"),
+                a=_required_text({"a": "", **_object(item)}, "a"),
+                score=_search_score(_object(item)),
             )
             for item in data
         ]
@@ -403,6 +404,17 @@ def _required_text(data: dict[str, Any], key: str) -> str:
     if isinstance(value, str):
         return value
     _malformed()
+
+
+def _search_score(data: dict[str, Any]) -> float:
+    scores = data.get("score")
+    if not isinstance(scores, list):
+        return _required_number(data, "score")
+    if not scores:
+        _malformed()
+    values = [_required_number(_object(score), "value") for score in scores]
+    # Preserve provider result order; different score types are not comparable.
+    return values[0]
 
 
 def _required_number(data: dict[str, Any], key: str) -> float:

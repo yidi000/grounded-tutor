@@ -158,3 +158,13 @@ class ChatResponse(BaseModel):
     answer_blocks: tuple[GroundedContentBlock, ...]
     citations: tuple[Citation, ...]
     suggested_actions: tuple[SuggestedAction, ...]
+
+
+class ChatHistoryExchange(BaseModel):
+    question: str
+    response: ChatResponse
+    legacy_content: str | None = None
+
+
+class ChatHistoryResponse(BaseModel):
+    exchanges: tuple[ChatHistoryExchange, ...]

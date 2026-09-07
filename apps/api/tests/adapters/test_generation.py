@@ -89,6 +89,10 @@ async def test_generation_client_requests_json_and_parses_generated_blocks() -> 
         httpx.Response(200, json={"choices": [{"message": {"content": "not-json"}}]}),
         httpx.Response(
             200,
+            json={"choices": [{"message": {"content": '{"blocks":[]}{"blocks":[]}'}}]},
+        ),
+        httpx.Response(
+            200,
             json={
                 "choices": [
                     {

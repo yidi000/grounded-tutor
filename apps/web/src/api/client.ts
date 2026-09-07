@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   ApiErrorResponseSchema,
   ChatResponseSchema,
+  ChatHistoryResponseSchema,
   PreviewResponseSchema,
   ProcessedPreviewResponseSchema,
   SourceIngestionResponseSchema,
@@ -156,6 +157,8 @@ export const api = {
       throw new ApiError(response.status, code);
     }
   },
+  chatHistory: (workspaceId: string, signal?: AbortSignal) =>
+    apiFetch(ChatHistoryResponseSchema, `/api/workspaces/${workspaceId}/chat/history`, { signal }),
   ask: (workspaceId: string, payload: ChatRequest) =>
     apiFetch(
       ChatResponseSchema,

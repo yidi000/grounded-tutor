@@ -361,3 +361,8 @@ export const ChatResponseSchema = z.object({
   suggested_actions: z.array(SuggestedActionSchema),
 });
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
+
+export const ChatHistoryResponseSchema = z.object({
+  exchanges: z.array(z.object({ question: z.string(), response: ChatResponseSchema, legacy_content: z.string().nullable().optional() })),
+});
+export type ChatHistoryResponse = z.infer<typeof ChatHistoryResponseSchema>;

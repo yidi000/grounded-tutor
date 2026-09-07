@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -86,9 +87,15 @@ async def _probe_formats(
                     content=(FIXTURES / fixture).read_bytes(),
                     settings=ChunkSettings(),
                 )
-                assert any(
-                    item.q.strip() or item.a.strip()
-                    for item in result.processed_preview.items
+                preview = result.processed_preview
+                # Collection creation can return before processed data is readable.
+                for _ in range(30):
+                    if any(item.q.strip() or item.a.strip() for item in preview.items):
+                        break
+                    await asyncio.sleep(2)
+                    preview = await service.processed_preview(workspace.id, result.source.id)
+                assert any(item.q.strip() or item.a.strip() for item in preview.items), (
+                    f"{filename}: no nonblank processed data after 30 preview refreshes"
                 )
     finally:
         try:
