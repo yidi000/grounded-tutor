@@ -279,7 +279,7 @@ primary response/error. Embedded service callers opt in with a TraceRecorder.
 - Create: `apps/api/tests/evaluation/test_runner.py`
 - Create: `evals/reports/.gitkeep`
 
-- [ ] **Step 1: Write the failing evaluator test**
+- [x] **Step 1: Write the failing evaluator test**
 
 ```python
 def test_p0_suite_has_required_distribution(load_cases) -> None:
@@ -297,19 +297,19 @@ def test_p0_suite_has_required_distribution(load_cases) -> None:
     }
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/evaluation/test_runner.py -q`
 
 Expected: FAIL because the case file and loader do not exist.
 
-- [ ] **Step 3: Add exact cases and metrics**
+- [x] **Step 3: Add exact cases and metrics**
 
 Create JSONL IDs `GA-01`–`GA-10`, `IM-01`–`IM-08`, `WI-01`–`WI-06`, `CV-01`–`CV-06`, `SS-01`–`SS-04`, `ID-01`–`ID-03`, and `RC-01`–`RC-03`. Each record contains `id`, `category`, `workspace_fixture`, `input`, `expected_status`, `expected_source_names`, `forbidden_source_names`, and `expected_external_calls`. The runner must validate every record with Pydantic, run against fake adapters, and write timestamped JSON with per-case result, aggregate metrics, configuration hash, and Git commit.
 
 Compute: grounded citation coverage, insufficient-material refusal rate, cross-Workspace leakage count, unauthorized external call count, idempotent replay rate, and journey pass rate. Keep targets in `evals/targets.json`; never replace measured values with targets.
 
-- [ ] **Step 4: Run and inspect the evaluator**
+- [x] **Step 4: Run and inspect the evaluator**
 
 Run:
 
@@ -320,7 +320,7 @@ Run:
 
 Expected: runner reports `40/40 executed`, writes `local.json`, and evaluator tests pass. The report may show failing product cases during development; the command itself must distinguish execution errors from metric failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add evals apps/api

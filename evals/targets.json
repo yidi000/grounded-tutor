@@ -1,0 +1,8 @@
+{
+  "grounded_citation_coverage": 1,
+  "insufficient_material_refusal_rate": 1,
+  "cross_workspace_leakage_count": 0,
+  "unauthorized_external_call_count": 0,
+  "idempotent_replay_rate": 1,
+  "journey_pass_rate": 1
+}
