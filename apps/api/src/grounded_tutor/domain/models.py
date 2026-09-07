@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, String, Uuid, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, func
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.schema import ForeignKeyConstraint, UniqueConstraint
@@ -301,6 +301,7 @@ class LearnerProfile(Base):
 class Assessment(Base):
     __tablename__ = "assessments"
     __table_args__ = (
+        Index("uq_assessments_workspace", "id", "workspace_id", unique=True),
         ForeignKeyConstraint(
             ["concept_id", "workspace_id"],
             ["concepts.id", "concepts.workspace_id"],
@@ -342,6 +343,7 @@ class Assessment(Base):
 class Attempt(Base):
     __tablename__ = "attempts"
     __table_args__ = (
+        Index("uq_attempts_assessment", "id", "assessment_id", unique=True),
         CheckConstraint(
             "status IN ('completed','not_assessed')", name="ck_attempt_status"
         ),
@@ -362,3 +364,34 @@ class Attempt(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Diagnostic(Base):
+    __tablename__ = "diagnostics"
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id", name="uq_diagnostics_workspace"),
+        CheckConstraint("status IN ('active','completed')", name="ck_diagnostic_status"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id"), index=True)
+    goal: Mapped[str] = mapped_column(String)
+    background: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DiagnosticQuestion(Base):
+    __tablename__ = "diagnostic_questions"
+    __table_args__ = (
+        ForeignKeyConstraint(["diagnostic_id", "workspace_id"], ["diagnostics.id", "diagnostics.workspace_id"]),
+        ForeignKeyConstraint(["assessment_id", "workspace_id"], ["assessments.id", "assessments.workspace_id"]),
+        ForeignKeyConstraint(["attempt_id", "assessment_id"], ["attempts.id", "attempts.assessment_id"]),
+        UniqueConstraint("diagnostic_id", "order", name="uq_diagnostic_question_order"),
+        CheckConstraint('"order" BETWEEN 1 AND 5', name="ck_diagnostic_question_order"),
+    )
+    assessment_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    diagnostic_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    order: Mapped[int] = mapped_column()
+    concept_label: Mapped[str] = mapped_column(String(120))
+    attempt_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const PublicErrorCodeSchema = z.enum([
   "demo_read_only",
+  "diagnostic_not_found",
+  "diagnostic_conflict",
   "empty_processed_source",
   "empty_source",
   "external_service_error",

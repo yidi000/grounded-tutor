@@ -84,3 +84,13 @@ def get_chat_service(
         tracing=TraceRecorder(session),
         invites=DiagnosticInviteService(session),
     )
+
+
+def get_diagnostic_service(
+    session: Annotated[Session, Depends(get_session)],
+    fastgpt: Annotated[FastGPTPort, Depends(get_fastgpt)],
+    generation: Annotated[GenerationPort, Depends(get_generation)],
+    locks: Annotated[WorkspaceLockRegistry, Depends(get_source_locks)],
+):
+    from grounded_tutor.services.diagnostics import DiagnosticService
+    return DiagnosticService(session, fastgpt, generation, locks)

@@ -17,6 +17,7 @@ from grounded_tutor.middleware import DemoReadOnlyMiddleware, PreviewRequestBody
 from grounded_tutor.routers.admin_evals import router as admin_evals_router
 from grounded_tutor.routers.capabilities import router as capabilities_router
 from grounded_tutor.routers.chat import router as chat_router
+from grounded_tutor.routers.diagnostics import router as diagnostics_router
 from grounded_tutor.routers.previews import router as previews_router
 from grounded_tutor.routers.sources import router as sources_router
 from grounded_tutor.routers.workspaces import router as workspaces_router
@@ -70,6 +71,7 @@ app.include_router(workspaces_router)
 app.include_router(previews_router)
 app.include_router(sources_router)
 app.include_router(chat_router)
+app.include_router(diagnostics_router)
 app.include_router(admin_evals_router)
 
 

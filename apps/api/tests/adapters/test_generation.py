@@ -177,3 +177,34 @@ async def test_generation_client_closes_only_the_client_it_owns() -> None:
     assert owned.is_closed is True
     assert injected.is_closed is False
     await injected.aclose()
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_adapter_uses_evidence_only_and_parses_questions():
+    data = {'questions':[{'id':str(i),'kind':'single_choice','prompt':f'选择均值定义 {i}',
+        'options':['平均数','中位数'],'answer_key':['平均数'],'explanation':'均值是平均数。',
+        'concept_label':'均值','chunk_ids':['chunk-1']} for i in range(3)]}
+    seen = []
+
+    async def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={'choices':[{'message':{'content':json.dumps(data)}}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        adapter = OpenAICompatibleGenerationClient('https://llm.test/v1', 'secret', 'model', client=http)
+        result = await adapter.generate_diagnostic('学习均值', '初学者', _request().chunks)
+    assert len(result.questions) == 3
+    payload = json.dumps(seen, ensure_ascii=False)
+    assert 'collection-private' not in payload and 'provider-name' not in payload
+    assert 'untrusted' in payload and 'questions array' in payload
+    assert '初学者' in payload and 'chunk-1' in payload
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_adapter_rejects_ask_shape_and_concatenated_json():
+    async def handler(request):
+        return httpx.Response(200, json={'choices':[{'message':{'content':'{"blocks":[]}{"questions":[]}'}}]})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        adapter = OpenAICompatibleGenerationClient('https://llm.test/v1', 'secret', 'model', client=http)
+        with pytest.raises(InvalidGenerationOutput):
+            await adapter.generate_diagnostic('goal', None, _request().chunks)

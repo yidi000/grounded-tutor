@@ -117,7 +117,7 @@ git commit -m "feat: add consented diagnostic invitation"
 - Create: `apps/api/tests/services/test_diagnostics.py`
 - Create: `apps/api/tests/api/test_diagnostics.py`
 
-- [ ] **Step 1: Write the failing diagnostic test**
+- [x] **Step 1: Write the failing diagnostic test**
 
 ```python
 @pytest.mark.asyncio
@@ -128,13 +128,13 @@ async def test_diagnostic_has_bounded_grounded_questions(diagnostic_service, wor
     assert all(question.kind in {"single_choice", "structured_short"} for question in diagnostic.questions)
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_diagnostics.py -q`
 
 Expected: FAIL because Diagnostic Service does not exist.
 
-- [ ] **Step 3: Implement start, answer, skip, and summary**
+- [x] **Step 3: Implement start, answer, skip, and summary**
 
 `POST /diagnostics` requires explicit `consent=true`, a READY Source, a user goal, and optional self-described background. Retrieve representative material and generate 3–5 structured questions with answer key, explanation, concept label, and chunk evidence through this typed extension of `GenerationPort`:
 
@@ -168,18 +168,20 @@ class GenerationPort(Protocol):
 
 Validate the 3–5 bound, question kind, non-empty server-only answer key, and every chunk ID against READY retrieval before persistence; one generation retry is allowed, then return `insufficient_material`. `POST /diagnostics/{id}/answers` accepts exactly one question response and is idempotent. `skip=true` stores `not_assessed`, never incorrect. Summary returns concept-level results `understood`, `needs_review`, or `not_assessed`; it must not return a fake overall ability percentage.
 
-- [ ] **Step 4: Verify API and citation behavior**
+- [x] **Step 4: Verify API and citation behavior**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_diagnostics.py apps/api/tests/api/test_diagnostics.py -q`
 
 Expected: tests cover missing consent, 3–5 bound, grounded answer keys, skip semantics, replay, and no overall percentage; all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
 git commit -m "feat: add grounded micro diagnostic"
 ```
+
+Implementation notes: see `docs/micro-diagnostics.md`. Local API/service and adapter verification covers this task; diagnostic desktop UI remains Task 7 and the deployed FastGPT questions contract is not yet live-verified.
 
 ### Task 4: Generate a finite grounded learning plan
 

@@ -13,6 +13,8 @@ from grounded_tutor.domain.schemas import ApiErrorDetail
 
 EXPECTED_PUBLIC_ERROR_CODES = {
     "demo_read_only",
+    "diagnostic_not_found",
+    "diagnostic_conflict",
     "empty_processed_source",
     "empty_source",
     "external_service_error",

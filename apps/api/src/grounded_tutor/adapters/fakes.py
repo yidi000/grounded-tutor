@@ -204,6 +204,8 @@ class FakeGeneration(GenerationPort):
     def __init__(self, *responses: GeneratedAnswer | BaseException) -> None:
         self.responses = list(responses)
         self.calls: list[GenerationRequest] = []
+        self.diagnostic_responses = []
+        self.diagnostic_calls = []
 
     async def generate_content(self, request: GenerationRequest) -> GeneratedAnswer:
         self.calls.append(request)
@@ -225,3 +227,14 @@ class FakeGeneration(GenerationPort):
                 ),
             )
         )
+
+    async def generate_diagnostic(self, goal, background, chunks):
+        from grounded_tutor.adapters.generation import InvalidGenerationOutput
+        self.diagnostic_calls.append((goal, background, chunks))
+        if self.diagnostic_responses:
+            result = self.diagnostic_responses.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        # No fabricated educational questions when a test has not supplied evidence.
+        raise InvalidGenerationOutput()
