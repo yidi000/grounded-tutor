@@ -56,5 +56,5 @@ regardless of apparently good metrics from the remaining cases.
 
 This suite does not measure live model accuracy, browser rendering, process-kill
 recovery or concurrent request races. Existing unit/API/E2E tests and live integration
-checks remain complementary. Trust Task 6 will wire the suite into the verification
-command and CI; this task only supplies the evaluator.
+checks remain complementary. Run `make verify-trust` for the combined verification gate. CI uploads only the
+numeric summary; see `docs/trust-verification.md` for the publication checks.

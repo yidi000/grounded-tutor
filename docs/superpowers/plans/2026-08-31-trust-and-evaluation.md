@@ -335,27 +335,27 @@ git commit -m "feat: add deterministic p0 evaluation suite"
 - Modify: `Makefile`
 - Create: `scripts/check_public_files.sh`
 
-- [ ] **Step 1: Add a failing Make gate**
+- [x] **Step 1: Add a failing Make gate**
 
 Define `verify-trust` to run backend tests, frontend tests, the 40-case evaluator, `git diff --check`, and `scripts/check_public_files.sh`. Run: `make verify-trust`.
 
 Expected: FAIL until the script and workflow-aligned commands exist.
 
-- [ ] **Step 2: Implement the public-file check**
+- [x] **Step 2: Implement the public-file check**
 
 `scripts/check_public_files.sh` exits nonzero if tracked files contain a FastGPT key prefix, bearer credential, private Dataset/App IDs from the local environment, `.env` files, or files under `evals/reports/` other than `.gitkeep` and explicitly named public reports. It must use fixed patterns without printing matched secret values.
 
-- [ ] **Step 3: Add GitHub Actions**
+- [x] **Step 3: Add GitHub Actions**
 
 CI checks out code, installs Python 3.12 and Node LTS, caches pip/npm, runs `make verify-trust`, and uploads only sanitized test reports. Secret scan uses Gitleaks on the full Git history. Neither workflow receives live FastGPT or LLM secrets for pull requests.
 
-- [ ] **Step 4: Run the complete trust gate**
+- [x] **Step 4: Run the complete trust gate**
 
 Run: `make verify-trust`
 
 Expected: all tests pass, 40 cases execute, no credential pattern is found, and the command exits 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .github Makefile scripts
