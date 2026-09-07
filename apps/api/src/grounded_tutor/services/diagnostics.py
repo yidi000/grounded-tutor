@@ -1,6 +1,5 @@
 """Consent-gated, grounded diagnostic lifecycle for the single-worker P0."""
 
-import unicodedata
 from uuid import uuid5
 
 from sqlalchemy import select
@@ -26,6 +25,7 @@ from grounded_tutor.domain.models import (
     Workspace,
 )
 from grounded_tutor.repositories.sources import SourceRepository
+from grounded_tutor.services.assessment_scoring import is_correct, normalize
 from grounded_tutor.services.grounding import ReadyChunk, ground_generated_answer
 from grounded_tutor.services.learning_requests import LearningRequests
 
@@ -36,10 +36,6 @@ class DiagnosticNotFoundError(RuntimeError):
 
 class DiagnosticConflictError(RuntimeError):
     pass
-
-
-def normalize(text):
-    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
 
 class DiagnosticService:
@@ -258,11 +254,7 @@ class DiagnosticService:
             ):
                 raise DiagnosticConflictError()
             # ponytail: exact normalized short-answer alternatives; semantic grading is deferred.
-            correct = not request.skip and (
-                request.response in assessment.answer_key
-                if assessment.kind == "single_choice"
-                else normalize(request.response) in {normalize(k) for k in assessment.answer_key}
-            )
+            correct = not request.skip and is_correct(assessment.kind, request.response, assessment.answer_key)
             result = (
                 "not_assessed" if request.skip else ("understood" if correct else "needs_review")
             )

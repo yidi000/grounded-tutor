@@ -104,3 +104,23 @@ def get_plan_service(
 ):
     from grounded_tutor.services.plans import PlanService
     return PlanService(session, fastgpt, generation, locks)
+
+
+def get_lesson_service(
+    session: Annotated[Session, Depends(get_session)],
+    fastgpt: Annotated[FastGPTPort, Depends(get_fastgpt)],
+    generation: Annotated[GenerationPort, Depends(get_generation)],
+    locks: Annotated[WorkspaceLockRegistry, Depends(get_source_locks)],
+):
+    from grounded_tutor.services.lessons import LessonService
+    return LessonService(session,fastgpt,generation,locks)
+
+
+def get_check_service(
+    session: Annotated[Session, Depends(get_session)],
+    fastgpt: Annotated[FastGPTPort, Depends(get_fastgpt)],
+    generation: Annotated[GenerationPort, Depends(get_generation)],
+    locks: Annotated[WorkspaceLockRegistry, Depends(get_source_locks)],
+):
+    from grounded_tutor.services.checks import CheckService
+    return CheckService(session,fastgpt,generation,locks)

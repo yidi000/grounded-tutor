@@ -208,6 +208,8 @@ class FakeGeneration(GenerationPort):
         self.diagnostic_calls = []
         self.plan_responses = []
         self.plan_calls = []
+        self.check_responses = []
+        self.check_calls = []
 
     async def generate_content(self, request: GenerationRequest) -> GeneratedAnswer:
         self.calls.append(request)
@@ -247,6 +249,16 @@ class FakeGeneration(GenerationPort):
         if self.plan_responses:
             result = self.plan_responses.pop(0)
             if isinstance(result, BaseException):
+                raise result
+            return result
+        raise InvalidGenerationOutput()
+
+    async def generate_check(self, objective, kind, chunks):
+        from grounded_tutor.adapters.generation import InvalidGenerationOutput
+        self.check_calls.append((objective,kind,chunks))
+        if self.check_responses:
+            result = self.check_responses.pop(0)
+            if isinstance(result,BaseException):
                 raise result
             return result
         raise InvalidGenerationOutput()

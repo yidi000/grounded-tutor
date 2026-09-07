@@ -264,7 +264,7 @@ Implementation notes: see `docs/learning-plans.md`. Includes persisted diagnosti
 - Create: `apps/api/tests/services/test_lessons.py`
 - Create: `apps/api/tests/services/test_checks.py`
 
-- [ ] **Step 1: Write failing learning-loop tests**
+- [x] **Step 1: Write failing learning-loop tests**
 
 ```python
 @pytest.mark.asyncio
@@ -282,28 +282,30 @@ async def test_passing_check_advances_to_next_concept(check_service, active_conc
     assert result.next_action == "next_concept"
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_lessons.py apps/api/tests/services/test_checks.py -q`
 
 Expected: FAIL because lesson and check services do not exist.
 
-- [ ] **Step 3: Implement LEARN and CHECK handlers**
+- [x] **Step 3: Implement LEARN and CHECK handlers**
 
 Lesson output is structured as `definition`, `explanation`, `example`, `citations`, and `available_depths`. “更简单”, “更多例子”, and “更深入” keep the same Concept ID. Immediate checks use single-choice or deterministic structured-short answers with evidence-backed explanations. Correct advances; incorrect sets `needs_review` and returns to the same concept; skip sets `not_assessed` and asks whether to continue. Persist state and Attempt atomically.
 
-- [ ] **Step 4: Verify the loop and conservative errors**
+- [x] **Step 4: Verify the loop and conservative errors**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_lessons.py apps/api/tests/services/test_checks.py -q`
 
 Expected: depth changes, cited lesson, pass, fail, skip, duplicate submission, and missing-evidence refusal tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api
-git commit -m "feat: add learn ask check handlers"
+git commit -m "feat: add grounded lessons and immediate checks"
 ```
+
+Implementation notes: see `docs/lessons-and-checks.md`. Includes persisted depth variants, checks linked to the originating lesson, atomic deterministic grading/skip confirmation, and READY revalidation before new check progression. ASK detours remain Task 6, desktop UI remains Task 7, and live FastGPT contracts are not yet verified.
 
 ### Task 6: Implement pause, ASK detours, and resume
 

@@ -408,3 +408,33 @@ class PlanOrigin(Base):
     plan_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
     diagnostic_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id", name="uq_lessons_workspace"),
+        ForeignKeyConstraint(["concept_id", "workspace_id"], ["concepts.id", "concepts.workspace_id"]),
+        UniqueConstraint("concept_id", "depth", name="uq_lessons_concept_depth"),
+        CheckConstraint("depth IN ('standard','simpler','more_examples','deeper')", name="ck_lesson_depth"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    concept_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    depth: Mapped[str] = mapped_column(String(32))
+    content_blocks: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ImmediateCheck(Base):
+    __tablename__ = "immediate_checks"
+    __table_args__ = (
+        ForeignKeyConstraint(["assessment_id", "workspace_id"], ["assessments.id", "assessments.workspace_id"]),
+        ForeignKeyConstraint(["lesson_id", "workspace_id"], ["lessons.id", "lessons.workspace_id"]),
+        ForeignKeyConstraint(["attempt_id", "assessment_id"], ["attempts.id", "attempts.assessment_id"]),
+    )
+    assessment_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True))
+    lesson_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    attempt_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)

@@ -12,6 +12,8 @@ PublicErrorCode = Literal[
     "idempotency_key_reused",
     "invalid_chunk_settings",
     "invalid_source_transition",
+    "learning_conflict",
+    "learning_not_found",
     "persistence_error",
     "plan_conflict",
     "plan_not_found",

@@ -11,7 +11,9 @@ import httpx
 from grounded_tutor.adapters.fastgpt import ExternalServiceError, RetrievedChunk
 from grounded_tutor.domain.answers import GeneratedAnswer
 from grounded_tutor.domain.diagnostics import GeneratedDiagnostic
+from grounded_tutor.domain.learning import AssessmentKind
 from grounded_tutor.domain.plans import GeneratedLearningPlan
+from grounded_tutor.domain.teaching import GeneratedCheck
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,8 @@ class GenerationRequest:
 
 
 class GenerationPort(Protocol):
+    async def generate_check(self, objective: str, kind: AssessmentKind, chunks: tuple[RetrievedChunk, ...]) -> GeneratedCheck: ...
+
     async def generate_plan(self, goal: str, diagnostic_summary: dict[str, str], chunks: tuple[RetrievedChunk, ...]) -> GeneratedLearningPlan: ...
 
     async def generate_diagnostic(self, goal: str, background: str | None, chunks: tuple[RetrievedChunk, ...]) -> GeneratedDiagnostic: ...
@@ -89,6 +93,10 @@ class OpenAICompatibleGenerationClient:
     async def generate_plan(self, goal: str, diagnostic_summary: dict[str, str], chunks: tuple[RetrievedChunk, ...]) -> GeneratedLearningPlan:
         request = GenerationRequest(mode="PLAN", instruction=json.dumps({"goal": goal, "diagnostic_summary": diagnostic_summary}, ensure_ascii=False), chunks=chunks)
         return await self._generate(request, GeneratedLearningPlan)
+
+    async def generate_check(self, objective: str, kind: AssessmentKind, chunks: tuple[RetrievedChunk, ...]) -> GeneratedCheck:
+        request = GenerationRequest(mode="CHECK", instruction=json.dumps({"objective":objective,"kind":kind},ensure_ascii=False),chunks=chunks)
+        return await self._generate(request,GeneratedCheck)
 
     async def _generate(self, request, output_type):
         if self._client.is_closed:
@@ -176,9 +184,12 @@ def _output_instructions(output_type) -> str:
             "(single_choice or structured_short). Use the supplied goal and diagnostic_summary. "
             "A not_assessed result means unknown, not wrong or mastered. Do not invent a percentage. "
         )
-    if output_type is GeneratedDiagnostic:
-        return (
-            "Return one JSON object with a questions array of 3 to 5 distinct questions. "
+    if output_type in {GeneratedDiagnostic, GeneratedCheck}:
+        prefix = ("Return one JSON object with one question in a question object. Use the requested kind and objective. "
+                  if output_type is GeneratedCheck else
+                  "Return one JSON object with a questions array of 3 to 5 distinct questions. ")
+        return prefix + (
+
             "Each question has id, kind (single_choice or structured_short), prompt, "
             "options, answer_key, explanation, concept_label, chunk_ids. "
             "Single choice has 2 to 6 distinct options and exactly one correct option in answer_key. "
