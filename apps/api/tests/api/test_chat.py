@@ -418,3 +418,25 @@ def test_chat_reports_pending_key_without_calling_providers(
     assert ApiErrorResponse.model_validate(response.json()).detail.code == "idempotency_in_progress"
     assert fake_fastgpt.search_calls == []
     assert fake_generation.calls == []
+
+
+def test_diagnostic_invitation_survives_replay_and_history(
+    client, seeded_workspace, api_session_factory, fake_fastgpt, fake_generation
+):
+    from grounded_tutor.domain.models import Assessment, Attempt
+
+    source = _seed_ready_source(api_session_factory, seeded_workspace)
+    fake_fastgpt.search_results_override = (
+        RetrievedChunk("chunk-ready", source.collection_id, "provider", "Mean", "sum / count", 1),
+    )
+    url = f"/api/workspaces/{seeded_workspace.id}/chat"
+    payload = {"message": "我是新手，应该怎么学？", "idempotency_key": "invite-test"}
+    first = client.post(url, json=payload)
+    assert first.status_code == 200
+    assert first.json()["suggested_actions"] == [{"type": "start_diagnostic"}]
+    assert client.post(url, json=payload).json() == first.json()
+    assert client.get(url + "/history").json()["exchanges"][0]["response"] == first.json()
+    assert len(fake_generation.calls) == 1
+    with api_session_factory() as session:
+        assert not list(session.scalars(select(Assessment)))
+        assert not list(session.scalars(select(Attempt)))

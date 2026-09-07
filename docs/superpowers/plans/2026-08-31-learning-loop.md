@@ -65,7 +65,7 @@ git commit -m "feat: add learning activity state"
 - Create: `apps/api/tests/services/test_routing.py`
 - Create: `apps/api/tests/services/test_diagnostic_invites.py`
 
-- [ ] **Step 1: Write failing precedence tests**
+- [x] **Step 1: Write failing precedence tests**
 
 ```python
 @pytest.mark.parametrize(("event", "activity", "expected"), [
@@ -78,25 +78,27 @@ def test_route_precedence(event, activity, expected) -> None:
     assert RoutePolicy().choose(event=event, active_mode=activity, classified_intent=None) == expected
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_routing.py apps/api/tests/services/test_diagnostic_invites.py -q`
 
 Expected: FAIL because Route Policy and invitation policy do not exist.
 
-- [ ] **Step 3: Implement route and invitation policies**
+- [x] **Step 3: Implement route and invitation policies**
 
 Precedence is: explicit UI event, active assessment/lesson, explicit textual intent, low-risk classifier, fallback ASK. Classifier output can suggest an invitation but cannot start CHECK, rebuild a plan, change Workspace, or call the network. Invite when the user explicitly says they are new/confused, asks how to learn, or asks for a test; otherwise require two related foundation questions in one conversation. The card has `开始诊断` and `继续提问`. Dismissal sets a 24-hour Workspace cooldown; acceptance clears the card and creates the diagnostic only once.
 
 When a low-risk classifier detects an unrelated topic, return `WorkspaceSuggestionAction(type="suggest_new_workspace", proposed_title="Linear Algebra")` with the classifier's bounded proposed title; keep the current Workspace, messages, and activity unchanged until the user explicitly creates or selects another Workspace. Save classifier observations only in `LearnerProfile.inferred_fields`; save the user's stated goal and background only in `confirmed_fields`, and never overwrite confirmed values with an inference.
 
-- [ ] **Step 4: Verify precedence and cooldown**
+**Implementation boundary (2026-09-07):** Task 2 persists a single invitation and stable explicit-consent ID in ActivityState (migration 0008), and exposes the existing ASK suggestion in replies/history. Actual diagnostic creation and its consent endpoint remain in Task 3; it must use this stable ID for exactly-once creation/replay. The card labels are defined here; card rendering remains Task 7. No live classifier call is added. See `docs/diagnostic-invitations.md`.
+
+- [x] **Step 4: Verify precedence and cooldown**
 
 Run: `.venv/bin/pytest apps/api/tests/services/test_routing.py apps/api/tests/services/test_diagnostic_invites.py -q`
 
 Expected: explicit actions win, ordinary questions stay ASK, a dismissal suppresses repeated invites, unrelated topics only produce a suggestion, inferred fields never overwrite confirmed fields, and the classifier never performs a high-impact action.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api

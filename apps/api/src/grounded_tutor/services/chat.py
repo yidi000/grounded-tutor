@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 from uuid import UUID, uuid4
 
@@ -12,7 +12,7 @@ from grounded_tutor.adapters.generation import (
     GenerationRequest,
     InvalidGenerationOutput,
 )
-from grounded_tutor.domain.answers import GeneratedAnswer, GroundedAnswer
+from grounded_tutor.domain.answers import GeneratedAnswer, GroundedAnswer, SuggestedAction
 from grounded_tutor.domain.schemas import ChatHistoryResponse
 from grounded_tutor.repositories.chat import (
     ChatConversationNotFoundError,
@@ -20,8 +20,13 @@ from grounded_tutor.repositories.chat import (
     ChatRepository,
 )
 from grounded_tutor.repositories.sources import SourcePersistenceError, SourceRepository
+from grounded_tutor.services.diagnostic_invites import (
+    DiagnosticInviteService,
+    InvitePersistenceError,
+)
 from grounded_tutor.services.grounding import ReadyChunk, ground_generated_answer
 from grounded_tutor.services.idempotency import request_hash
+from grounded_tutor.services.routing import RoutePolicy
 from grounded_tutor.services.tracing import TracePersistenceError, TraceRecorder
 
 logger = logging.getLogger(__name__)
@@ -48,6 +53,7 @@ class ChatResult:
     conversation_id: UUID
     message_id: UUID
     answer: GroundedAnswer
+    suggested_actions: tuple[SuggestedAction, ...] = ()
 
 
 class ChatService:
@@ -58,17 +64,59 @@ class ChatService:
         fastgpt: FastGPTPort,
         generation: GenerationPort,
         tracing: TraceRecorder | None = None,
+        invites: DiagnosticInviteService | None = None,
     ) -> None:
         self._sources = sources
         self._chats = chats
         self._fastgpt = fastgpt
         self._generation = generation
         self._tracing = tracing
+        self._invites = invites
 
     def history(self, workspace_id: UUID) -> ChatHistoryResponse:
         if self._sources.get_workspace_dataset_id(workspace_id) is None:
             raise ChatWorkspaceNotFoundError
-        return self._chats.history(workspace_id)
+        history = self._chats.history(workspace_id)
+        if self._invites is None:
+            return history
+        try:
+            card = self._invites.current(workspace_id)
+        except (InvitePersistenceError, ValueError):
+            return history
+        if card and card.status == "offered":
+            from grounded_tutor.domain.answers import SimpleSuggestedAction
+
+            return history.model_copy(
+                update={
+                    "exchanges": tuple(
+                        exchange.model_copy(
+                            update={
+                                "response": exchange.response.model_copy(
+                                    update={
+                                        "suggested_actions": (
+                                            SimpleSuggestedAction(type="start_diagnostic"),
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                        if exchange.response.message_id == card.message_id
+                        else exchange
+                        for exchange in history.exchanges
+                    )
+                }
+            )
+        return history
+
+    def _with_invitation(self, workspace_id: UUID, result: ChatResult) -> ChatResult:
+        if self._invites is None:
+            return result
+        try:
+            actions = self._invites.suggest(workspace_id, result.conversation_id, result.message_id)
+        except (InvitePersistenceError, ValueError):
+            logger.warning("Unable to update optional diagnostic invitation")
+            return result
+        return replace(result, suggested_actions=actions)
 
     async def ask(
         self,
@@ -92,7 +140,7 @@ class ChatService:
         if saved is not None:
             invalid = False
             try:
-                return ChatResult(
+                result = ChatResult(
                     UUID(saved["conversation_id"]),
                     UUID(saved["message_id"]),
                     GroundedAnswer.model_validate(saved["answer"]),
@@ -101,11 +149,14 @@ class ChatService:
                 invalid = True
             if invalid:
                 raise ChatPersistenceError()
+            return self._with_invitation(workspace_id, result)
         started = perf_counter()
         trace = {
             "workspace_id": workspace_id,
             "request_id": str(uuid4()),
-            "route": "ASK",
+            "route": RoutePolicy().choose(
+                event="ASK_QUESTION", active_mode=None, classified_intent=None
+            ),
             "retrieval": {"chunk_ids": [], "scores": [], "chunks": []},
             "generation": {
                 "instruction": message,
@@ -146,7 +197,7 @@ class ChatService:
         )
         trace["generation"]["answer"] = result.answer.model_dump(mode="json")
         self._record_trace(trace, started)
-        return result
+        return self._with_invitation(workspace_id, result)
 
     def _record_trace(self, trace: dict, started: float) -> None:
         trace["timing"]["total_ms"] = (perf_counter() - started) * 1000

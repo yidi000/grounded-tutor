@@ -279,6 +279,7 @@ class ActivityState(Base):
     suspended_activity: Mapped[dict[str, Any] | None] = mapped_column(
         JSON(none_as_null=True), nullable=True
     )
+    diagnostic_invitation: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     return_checkpoint: Mapped[str | None] = mapped_column(String, nullable=True)
     nudge_cooldown_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -77,7 +77,7 @@ async def ask(
             SimpleSuggestedAction(type="rephrase"),
         )
         if result.answer.status == "insufficient_material"
-        else ()
+        else result.suggested_actions
     )
     return ChatResponse(
         conversation_id=result.conversation_id,

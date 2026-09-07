@@ -13,6 +13,7 @@ from grounded_tutor.repositories.chat import ChatRepository
 from grounded_tutor.repositories.sources import SourceRepository
 from grounded_tutor.repositories.workspaces import WorkspaceRepository
 from grounded_tutor.services.chat import ChatService
+from grounded_tutor.services.diagnostic_invites import DiagnosticInviteService
 from grounded_tutor.services.previews import PreviewService
 from grounded_tutor.services.source_locks import WorkspaceLockRegistry
 from grounded_tutor.services.sources import SourceService
@@ -81,4 +82,5 @@ def get_chat_service(
         fastgpt,
         generation,
         tracing=TraceRecorder(session),
+        invites=DiagnosticInviteService(session),
     )
