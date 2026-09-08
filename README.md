@@ -1,42 +1,47 @@
+<div align="center">
+
 # Grounded Tutor
 
-A desktop-first evidence notebook for learners studying their own documents.
-It connects questions, explanations and short checks to inspectable source text,
-so the learner can examine where an answer came from.
+### 围绕你的资料学习，让每个回答都有据可查。
 
-## Capabilities
+导入讲义与笔记 · 核对原文引用 · 循序学习与练习
 
-Create, rename and delete topic Workspaces; import files or paste text; review and accept processed
-sources; ask questions with numbered citations; restore saved history. Optional
-micro-diagnostics lead to finite learning plans, cited lessons and immediate
-checks. Pause a learning activity, ask a question, and resume its saved checkpoint.
+[![Release verification](https://github.com/yidi000/grounded-tutor/actions/workflows/ci.yml/badge.svg)](https://github.com/yidi000/grounded-tutor/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/License-MIT-713E4B.svg)](LICENSE)
 
-## Non-goals
+[快速开始](#快速开始) · [接入真实模型](#接入真实模型) · [完整部署指南](docs/local-development.md) · [反馈问题](https://github.com/yidi000/grounded-tutor/issues)
 
-This is a local single-user prototype, not a public multi-user service. Accounts,
-mobile design, images, webpage import and whole-site sync are not implemented.
-General-knowledge Q&A with an upload reminder is deferred. Missing evidence does
-not authorize uncited answers. Saved history does not enable model chat memory.
+</div>
 
-## Architecture
+![Grounded Tutor 桌面界面：左侧选择学习主题，中间阅读回答，右侧核对引用原文](docs/images/grounded-tutor-desktop.png)
 
-React/Vite provides the UI, FastAPI owns product behavior, and SQLite stores local
-history, source versions and learning progress. FastGPT supplies document processing
-and retrieval; an OpenAI-compatible endpoint supplies structured generation.
-See [architecture](docs/architecture.md).
+<p align="center"><sub>真实界面截图，使用项目自带的公开 RAG 示例；不含私人资料。</sub></p>
 
-## Fake-adapter quick start
+## 从「得到答案」到「理解资料」
 
-Use Python 3.12 or 3.13, Node.js 24 and npm, Git and Make. The commands below are
-for a POSIX shell, run from the repository root after cloning or downloading it.
+Grounded Tutor 是一个在本地运行的学习工作区。把课程资料放进主题，围绕资料提问，再沿着引用回到原文核对。需要进一步学习时，可以进入小诊断、学习路径和理解检查。
+
+| 提问与核对 | 学习与练习 | 资料与主题 |
+| :--- | :--- | :--- |
+| 回答带编号引用，点击查看原文片段 | 从小诊断生成有限的学习路径 | 上传文件或粘贴文本，先预览再接受 |
+| 刷新后恢复问答与引用 | 阅读讲解，做题并查看反馈 | 各主题独立保存资料、历史与进度 |
+| 依据不足时明确提示 | 暂停学习、追问，再继续原进度 | 创建、重命名和确认删除主题 |
+
+## 快速开始
+
+**准备：Python 3.12 / 3.13、Node.js 24、npm、Git、Make。** 以下命令适用于 macOS / Linux 的终端。
+
+**1 · 下载并安装**
 
 ```sh
+git clone https://github.com/yidi000/grounded-tutor.git
+cd grounded-tutor
 python3 -m venv .venv
 .venv/bin/python -m pip install -e 'apps/api[test]'
 npm --prefix apps/web ci
 ```
 
-For a fresh installation, copy the template without overwriting existing settings:
+**2 · 初始化并启动后端**
 
 ```sh
 test -f apps/api/.env || cp apps/api/.env.example apps/api/.env
@@ -44,127 +49,63 @@ test -f apps/api/.env || cp apps/api/.env.example apps/api/.env
 make api-dev
 ```
 
-The template selects fake providers with blank keys. If you already have live
-settings, use a separate checkout for this walkthrough. Do not overwrite your
-existing database or configuration. In a second terminal, from the same root:
+**3 · 新开一个终端，启动前端**
+
+在同一个 `grounded-tutor` 目录运行：
 
 ```sh
 VITE_APP_MODE=local npm --prefix apps/web run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open `http://127.0.0.1:5173`; the dev server proxies `/api` to port 8000. Create a
-Workspace, add the [original sample material](samples/rag-fundamentals/README.md),
-review processing and accept it. Fake providers produce deterministic fixture
-responses, not meaningful AI answers, and their remote-like state is in memory.
-Use live mode to study real documents; fake mode is for interface exploration.
+打开 **http://127.0.0.1:5173**，创建主题，导入[示例资料](samples/rag-fundamentals/README.md)，复核后开始体验。
 
-For the fixed read-only frontend demonstration, no backend is needed:
+> 默认配置使用 **Fake 模式**：无需 API Key，适合体验流程，回答是固定测试内容。要让模型分析真实资料，请完成下面的配置。
+
+## 接入真实模型
+
+在本地 `apps/api/.env` 中设置 `EXTERNAL_MODE=live`，填写 FastGPT 和生成模型的连接配置，随后重启后端并创建新主题。
+
+| 组件 | 负责什么 |
+| :--- | :--- |
+| **Grounded Tutor** | 页面、主题、历史、学习流程和本地数据 |
+| **FastGPT** | 资料解析、整理和检索 |
+| **生成模型** | 根据检索到的片段组织回答；可使用专用 FastGPT 应用或兼容端点 |
+
+**[查看逐步配置指南 →](docs/fastgpt-generation.md)**
+
+密钥只放在被 Git 忽略的本地 `.env`，不要填写到前端或提交到 GitHub。使用云端 FastGPT / 模型服务时，相关资料会发送到所配置的服务；本地运行不等于完全离线。
+
+<details>
+<summary><strong>只想查看界面，不启动后端？</strong></summary>
+
+安装前端依赖后，运行：
 
 ```sh
 VITE_APP_MODE=demo_read_only npm --prefix apps/web run dev -- --host 127.0.0.1 --port 5173
 ```
 
-This starts a local 只读示例 with a fixed answer and inspectable citation. The
-在本地使用我的资料 link opens bundled setup instructions. The demo has no live
-chat or upload and does not save visitor input. Its original Chinese fixture text
-is dedicated under CC0; application code remains MIT.
+这是固定内容的本地只读示例，可查看引用；不提供上传、实时聊天或数据保存。
 
-For the static artifact run `make demo-build`; for production-build browser checks
-under a repository subpath run `make demo-check`. `VITE_PUBLIC_BASE_PATH` controls
-the build base (default `/`). `make release-check` includes the nested-path demo
-checks. Pages packaging exists but no deployment URL is available yet.
+</details>
 
-This release distributes source code for local deployment. No hosted service or
-public demo deployment is provided. The optional Pages workflow remains inactive;
-leave `DEMO_PAGES_APPROVED` unset. No FastGPT or model key belongs in GitHub or
-the frontend. See [release checks](docs/release-checklist.md).
+## 当前范围
 
-Deleting a topic permanently removes its cloud dataset and local sources, chat
-history and learning progress after confirmation. See [deletion behavior and
-retry handling](docs/workspace-deletion.md).
+本项目供**下载源码、本地单用户部署**，没有托管的在线服务。后端仅监听本机，使用一个 worker。
 
-## Live FastGPT and model-provider setup
+- 已支持桌面端；账号系统、移动端和图片解析暂未实现。
+- 问答依赖已接受的资料；一般知识自由聊天与上传提醒仍在计划中。
+- 保存历史不等于模型具有跨轮记忆，引用结构检查也不能保证模型语义完全正确。
+- 删除主题会同时清理关联资料、对话与进度，请确认后再操作。
 
-Edit only your ignored `apps/api/.env`: set `EXTERNAL_MODE=live`, your FastGPT
-service origin and key, and the generation endpoint, key and model. Restart the
-API after configuration changes. Existing sources in fake mode do not provision
-real cloud datasets; use a new Workspace for live material.
+## 文档与开发
 
-The generator can be a dedicated FastGPT application or another compatible
-endpoint. For FastGPT, select the actual model in that application's workflow,
-keep history zero and tools disabled, and use the versioned structured prompt.
-Follow [the exact generation setup](docs/fastgpt-generation.md). Keep images off.
-Never place keys in frontend variables, tracked files or browser screenshots.
+| 想了解什么 | 从这里开始 |
+| :--- | :--- |
+| 安装、运行、测试与环境限制 | [完整部署指南](docs/local-development.md) |
+| 模型接入与 FastGPT 工作流 | [生成配置](docs/fastgpt-generation.md) |
+| 数据流与技术实现 | [架构说明](docs/architecture.md) |
+| 测试标准与测量结果 | [评估说明](docs/evaluation.md) · [公开评估快照](evals/reports/public-p0.md) |
+| 密钥、资料与诊断信息的处理 | [安全与数据](docs/security-and-data.md) |
+| 参与改进 | [贡献指南](CONTRIBUTING.md) · [Issues](https://github.com/yidi000/grounded-tutor/issues) |
 
-## Testing
-
-```sh
-npm --prefix apps/web exec -- playwright install chrome
-make verify-learning
-```
-
-The gate runs backend tests, Ruff, frontend tests/build, 40 ASK evaluations,
-8 learning evaluations and desktop Playwright journeys. Browser dependencies may
-need installation on Linux. CI is configured to run the release gate and secret scan, including desktop
-journeys; its hosted execution is still pending publication. Live probes are opt-in and incur external
-service calls; see [evaluation](docs/evaluation.md).
-
-To run the existing live probes explicitly with your local credentials:
-
-```sh
-RUN_LIVE_INTEGRATION=1 make test-live
-```
-
-Without opt-in the command stops before loading settings. It checks required
-configuration names without printing values and suppresses pytest tracebacks.
-It creates temporary cloud datasets using synthetic material and attempts cleanup;
-provider failures may require manual cleanup. Images remain conditional on the
-existing disabled-by-default capability. No credentials are copied into test files.
-
-Before release, stage the intended files and run `make release-check`. It includes
-`verify-learning`, API import, saved public report consistency and redacted secret
-scans of all Git history plus staged/working tracked snapshots. Install Gitleaks
-8.30.1 or run Docker for the pinned scanner fallback. Missing tools or findings
-fail the gate. See the [release checklist](docs/release-checklist.md).
-
-## Target thresholds
-
-Deterministic citation coverage, refusal, replay and journey ratios must equal 1;
-workspace leakage and unauthorized provider-call counts must equal 0. These are
-software acceptance targets, not claims of model accuracy. Definitions and the
-48-case inventory are in [evaluation](docs/evaluation.md).
-
-## Measured results
-
-See the generated [public evaluation report](evals/reports/public-p0.md) and its
-[machine-readable measurements](evals/reports/public-p0.json) for the current
-published snapshot, evaluated commit, timestamp, category outcomes and targets.
-The JSON contains measured values; the Markdown is rendered from that JSON.
-Regenerate both by running `.venv/bin/python scripts/render_evaluation_report.py`.
-
-These deterministic results do not measure model accuracy. Earlier live synthetic
-learning and Office checks are separate integration evidence; see
-[integration scope](docs/learning-ui.md) and [generation verification](docs/fastgpt-generation.md).
-The public snapshot contains no raw source text, answers, traces or service configuration.
-
-## Limitations and roadmap
-
-Run one API worker on loopback only: Workspace locks are process-local and there
-is no account authentication. Python dependencies are not fully pinned, so setup
-is documented but not yet an exact reproducible environment. Structural citation
-checks cannot guarantee semantic faithfulness. Provider availability and output
-vary; unsupported or malformed answers fail closed. See the
-[roadmap](docs/superpowers/plans/2026-08-31-grounded-tutor-implementation-roadmap.md)
-for release work and deferred accounts, cloud Workspaces and basic Q&A.
-
-## Security, data and contributions
-
-Read [security and data handling](docs/security-and-data.md) before live use or
-sharing diagnostics, and [contribution guidelines](CONTRIBUTING.md) before
-submitting changes. Raw traces and evaluation reports can contain source text.
-
-## License
-
-Project code is under the [MIT License](LICENSE). The two original sample documents
-have a separate CC0 dedication in their [sample README](samples/rag-fundamentals/README.md).
-Third-party dependencies retain their own licenses.
+代码采用 [MIT License](LICENSE)。项目自带示例资料采用 [CC0](samples/rag-fundamentals/README.md)。
