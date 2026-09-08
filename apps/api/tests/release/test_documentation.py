@@ -39,8 +39,8 @@ def test_readmes_share_install_commands_and_language_navigation():
     english = (ROOT / "README.en.md").read_text()
     assert "[English](README.en.md)" in chinese
     assert "[简体中文](README.md)" in english
-    assert re.findall(r"```sh\n(.*?)```", chinese, re.S) == re.findall(
-        r"```sh\n(.*?)```", english, re.S
+    assert re.findall(r"```sh\n(.*?)```", chinese, re.DOTALL) == re.findall(
+        r"```sh\n(.*?)```", english, re.DOTALL
     )
 
 
