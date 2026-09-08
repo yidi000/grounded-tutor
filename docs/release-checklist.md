@@ -42,13 +42,17 @@ raw traces and browser failure artifacts remain unshared. Hosted CI has not run 
 - [x] Run the complete local release gate on the staged candidate.
 - [x] Verify installation in a fresh directory without copying real `.env` or databases.
 - [x] Inspect Git history and remotes; no remote is configured. Final status is checked after commit.
-- [ ] Confirm hosted read-only demo reset, no-write proof, base path and local-setup link.
+- [x] Verify the built read-only demo reset, no-write proof, base path and local-setup link locally.
+- [ ] Repeat those checks at the real hosted URL after approved deployment.
 - [ ] Obtain the owner's exact account/organization, repository name and visibility.
 - [ ] Obtain explicit authorization before creating a remote, pushing or deploying.
 - [ ] After publication: verify CI/Pages, clean clone and the actual deployed URL.
 
-The deterministic demo packaging is a separate next task. A local demo does not
-mean Pages is configured or deployed. Accounts and cloud Workspaces remain deferred.
+Deterministic demo packaging is now included. Pages remains inactive until explicit
+publication approval, repository setup and `DEMO_PAGES_APPROVED=true`. Build jobs
+also check the actual default branch. Root/custom-domain and repository paths use
+Pages metadata; nested path behavior has been verified locally. Accounts and cloud
+Workspaces remain deferred.
 
 ## Local evidence (2026-09-08)
 
@@ -70,5 +74,33 @@ The Docker fallback was syntax/review checked; actual local scans used the nativ
 checksum-verified binary because Docker was not running.
 
 GitHub CLI authentication was not verified. No remote, repository, push, Pages
-configuration or publication was created. Continue with the separate static demo
-packaging task before requesting publication details and approval.
+configuration or publication was created. The static demo packaging follow-up below completes the local artifact; repository
+details and explicit publication approval are still required.
+
+## Static demo package
+
+The fixed Chinese RAG fixture is version `rag-demo-v1`, recursively frozen, with
+explicit CC0 provenance and resolvable citations. Production-build browser tests
+run on 1280×720 and 1440×900 at `/grounded-demo/`, checking citations, reload reset,
+empty local/session storage, no API or write requests, and setup-page round trips.
+`release-check` now includes these tests after the existing local/demo journeys.
+
+The Pages workflow uses official pinned actions, a Node 24 build, lockfile install,
+unit and static browser tests before building the actual Pages base path. The build
+job has read-only content/Pages permissions; only deployment gets Pages write and
+OIDC permissions. Concurrency is separated by branch. Jobs require both the explicit
+`DEMO_PAGES_APPROVED=true` variable and the actual default branch. Only `apps/web/dist`
+is uploaded, without provider credentials. No workflow has been enabled or deployed.
+
+After publication is explicitly approved, configure Pages with GitHub Actions as
+its source and set the approval variable. Repository name, owner, visibility and
+Git authentication must be confirmed first. The final hosted URL, root/custom-domain
+behavior and hosted CI remain to be verified after deployment. See the official
+[Vite Pages guide](https://vite.dev/guide/static-deploy.html#github-pages) and
+[Pages configuration action](https://github.com/actions/configure-pages).
+
+Final local package gate (2026-09-08): exit 0, 960 backend passed/7 live skipped,
+60 frontend passed, 48 deterministic cases passed, 14 existing desktop journeys
+passed/14 mode skips, and 2 static-demo journeys passed. Gitleaks history plus
+staged/working tracked snapshots, API import, report check and build passed.
+Independent review passed after fixing cross-branch deployment cancellation.

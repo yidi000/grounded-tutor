@@ -64,8 +64,22 @@ For the fixed read-only frontend demonstration, no backend is needed:
 VITE_APP_MODE=demo_read_only npm --prefix apps/web run dev -- --host 127.0.0.1 --port 5173
 ```
 
-This starts a local demo. Public hosting and its local-setup handoff are still
-release work; no deployed demo URL is promised here.
+This starts a local 只读示例 with a fixed answer and inspectable citation. The
+在本地使用我的资料 link opens bundled setup instructions. The demo has no live
+chat or upload and does not save visitor input. Its original Chinese fixture text
+is dedicated under CC0; application code remains MIT.
+
+For the static artifact run `make demo-build`; for production-build browser checks
+under a repository subpath run `make demo-check`. `VITE_PUBLIC_BASE_PATH` controls
+the build base (default `/`). `make release-check` includes the nested-path demo
+checks. Pages packaging exists but no deployment URL is available yet.
+
+The Pages workflow stays disabled unless the owner explicitly approves publication
+and then sets repository variable `DEMO_PAGES_APPROVED=true`. It runs build/deploy
+jobs only on pushes to the actual default branch, obtains the base from Pages
+metadata, tests the static demo and uploads only `apps/web/dist`. Configure Pages
+to use GitHub Actions after approval. No FastGPT or model secret is supplied.
+See [publication readiness](docs/release-checklist.md).
 
 ## Live FastGPT and model-provider setup
 

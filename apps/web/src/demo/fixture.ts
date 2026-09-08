@@ -17,6 +17,8 @@ type ReadonlyCapabilities = Readonly<
   }>;
 
 export type DemoFixture = Readonly<{
+  version: "rag-demo-v1";
+  provenance: Readonly<{ license: "CC0-1.0"; origin: string }>;
   topic: Readonly<{
     label: "示例主题";
     title: "RAG 基础";
@@ -85,12 +87,22 @@ const demoResponse: ChatResponse = {
   suggested_actions: [],
 };
 
-export const demoFixture: DemoFixture = Object.freeze({
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    Object.values(value).forEach(deepFreeze);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export const demoFixture: DemoFixture = deepFreeze({
+  version: "rag-demo-v1",
+  provenance: { license: "CC0-1.0", origin: "Original synthetic Chinese RAG example for Grounded Tutor" },
   topic: Object.freeze({
     label: "示例主题",
     title: "RAG 基础",
   }),
-  localInstructionsUrl: "/local-setup.html",
+  localInstructionsUrl: `${import.meta.env.BASE_URL}local-setup.html`,
   capabilities,
   exchange: Object.freeze({
     question: "为什么 RAG 的回答还需要显示资料依据？",

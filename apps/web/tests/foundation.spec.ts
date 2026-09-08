@@ -123,6 +123,9 @@ test("demo opens fixed citation and performs no write request", async ({ page },
   await page.keyboard.press("Enter");
   await expect(page.getByRole("complementary", { name: "上下文" })).toContainText("RAG 学习笔记");
   await expect(page.getByText("这是预先生成的回答；真实提问请使用本地版本。")).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "回答依据会显示在这里" })).toBeVisible();
+  await expect(anchor).toBeVisible();
   await expect(page.getByLabel("向资料提问")).toBeDisabled();
   expect(writes).toEqual([]);
 

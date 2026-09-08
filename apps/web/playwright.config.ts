@@ -8,6 +8,7 @@ const testDatabaseUrl = `sqlite:///${testDatabasePath}`;
 
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: "demo-static.spec.ts",
   fullyParallel: false,
   workers: 1,
   reporter: "line",

@@ -38,3 +38,21 @@ and fabricated identifiers but cannot guarantee semantic truth or complete promp
 injection resistance. Keep generator tools and external-action workflow nodes off.
 
 See [contribution reporting guidance](../CONTRIBUTING.md) for private disclosures.
+
+## Static demo boundary
+
+The Pages artifact is a fixed 只读示例. It has no functional visitor chat/upload,
+no API calls, and saves no visitor input. Local production-build tests verify no
+write requests, no local/session storage writes during interactions, reset after
+reload and links under a repository subpath. This does not claim anonymous hosting:
+the hosting provider may retain ordinary access logs independently.
+
+The Chinese sample in `apps/web/src/demo/fixture.ts` is original synthetic project
+text dedicated under CC0 1.0; its version and provenance are explicit and the
+fixture is recursively frozen. It contains no private uploaded source material.
+
+The Pages build job reads repository content and Pages metadata. Only the deploy
+job has `pages:write` and `id-token:write`; it uses GitHub's provided deployment
+credentials, no provider key. Approval variable and actual default-branch checks
+keep jobs inactive until explicitly enabled. Only `apps/web/dist` is uploaded.
+The current workspace has not enabled Pages, pushed a repository or deployed a site.

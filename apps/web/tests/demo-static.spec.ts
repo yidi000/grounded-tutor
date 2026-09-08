@@ -1,0 +1,32 @@
+import { expect, test } from "@playwright/test";
+
+test("production demo resets without persistence and works under a repository path", async ({ page }, testInfo) => {
+  const requests: { method: string; path: string }[] = [];
+  const errors: string[] = [];
+  page.on("request", (request) => requests.push({ method: request.method(), path: new URL(request.url()).pathname }));
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("./");
+  await expect(page.getByText("公开只读示例", { exact: true })).toBeVisible();
+  const answer = page.getByText("RAG 先从资料中检索相关片段，再让模型依据这些片段组织回答。显示引用让学习者能核对结论是否真的受到资料支持。", { exact: true });
+  await expect(answer).toBeVisible();
+  await expect(page.getByLabel("向资料提问")).toBeDisabled();
+  await page.getByRole("button", { name: /引用 1/ }).click();
+  await expect(page.getByRole("button", { name: "关闭引用详情" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "回答依据会显示在这里" })).toBeVisible();
+  await expect(answer).toBeVisible();
+  expect(await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))).toEqual({ local: 0, session: 0 });
+  const setup = page.getByRole("link", { name: "在本地使用我的资料" });
+  await expect(setup).toHaveAttribute("href", "/grounded-demo/local-setup.html");
+  await setup.click();
+  await expect(page).toHaveURL(/\/grounded-demo\/local-setup\.html$/);
+  await expect(page.getByRole("heading", { name: "在本地运行 Grounded Tutor" })).toBeVisible();
+  await page.getByRole("link", { name: "返回只读示例" }).click();
+  await expect(page).toHaveURL(/\/grounded-demo\/$/);
+  await expect(answer).toBeVisible();
+  expect(requests.every((request) => ["GET", "HEAD", "OPTIONS"].includes(request.method))).toBe(true);
+  expect(requests.every((request) => request.path.startsWith("/grounded-demo/"))).toBe(true);
+  expect(requests.some((request) => request.path.includes("/api/"))).toBe(false);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath("static-demo.png"), fullPage: false });
+});

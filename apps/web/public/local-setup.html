@@ -17,13 +17,14 @@
     <main>
       <p>本地完整模式</p>
       <h1>在本地运行 Grounded Tutor</h1>
-      <p>取得项目代码后，在仓库根目录依次执行：</p>
-      <code>python3 -m venv .venv<br />.venv/bin/pip install -e 'apps/api[test]'<br />npm --prefix apps/web ci<br />.venv/bin/alembic -c apps/api/alembic.ini upgrade head</code>
+      <p>准备 Python 3.12 或 3.13、Node.js 24 和 npm。取得项目代码后，在仓库根目录依次执行：</p>
+      <code>python3 -m venv .venv<br />.venv/bin/pip install -e 'apps/api[test]'<br />npm --prefix apps/web ci<br />test -f apps/api/.env || cp apps/api/.env.example apps/api/.env<br />.venv/bin/alembic -c apps/api/alembic.ini upgrade head</code>
       <p>然后分别打开两个终端：</p>
       <code>make api-dev</code>
       <code>npm --prefix apps/web run dev</code>
-      <p>默认使用内置 fake adapter，不需要外部 API Key；终端会显示本地访问地址。</p>
-      <a href="/">返回只读示例</a>
+      <p>新配置默认使用模拟服务，不需要外部 API Key，只适合体验操作流程。若已有真实服务配置，请在独立目录体验，勿覆盖现有配置和数据库。</p>
+      <p>要使用自己的资料进行真实问答，请按照项目 README 和 docs/fastgpt-generation.md 配置服务。请勿把 Key 填进网页或提交到 Git。</p>
+      <a href="./">返回只读示例</a>
     </main>
   </body>
 </html>

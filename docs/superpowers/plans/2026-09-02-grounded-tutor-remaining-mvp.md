@@ -1487,19 +1487,19 @@ Report the seven learning journey groups, evaluation results, desktop screenshot
 - Modify: `docs/release-checklist.md`
 - Modify: `Makefile`
 
-- [ ] **Step 1: Lock and test the demo seed**
+- [x] **Step 1: Lock and test the demo seed**
 
 The fixture exports a version string, one non-editable Workspace, copyright-safe source metadata, one structured answer, and matching citations. A unit test deep-freezes it and asserts every citation ID resolves.
 
-- [ ] **Step 2: Prove reset and no-write behavior**
+- [x] **Step 2: Prove reset and no-write behavior**
 
 Playwright opens the demo, changes only ephemeral UI state, reloads, and asserts the initial fixture is restored. It records network requests and fails on every non-GET/HEAD/OPTIONS method. API tests separately prove `demo_read_only` rejects direct write calls.
 
-- [ ] **Step 3: Document the two modes honestly**
+- [x] **Step 3: Document the two modes honestly**
 
 README labels the hosted build `只读示例` and links `在本地使用我的资料` to exact local setup. Security documentation says visitor input is not saved because the demo does not provide live chat or upload; it does not claim cloud accounts or private storage.
 
-- [ ] **Step 4: Build a static GitHub Pages artifact and add it to the release gate**
+- [x] **Step 4: Build a static GitHub Pages artifact and add it to the release gate**
 
 Configure Vite's base path from `VITE_PUBLIC_BASE_PATH`, leaving `/` as the local default. `demo-pages.yml` runs only after pushes to the approved default branch, installs from the lockfile, builds with `VITE_APP_MODE=demo_read_only`, uploads only `apps/web/dist`, and deploys with GitHub Pages' official actions. It receives no FastGPT, LLM, or repository secret other than the Pages deployment token provided by GitHub.
 
@@ -1512,7 +1512,7 @@ git diff --check
 
 Expected: fake-adapter verification, 48 evaluation cases, demo reset/no-write journeys, static demo production build, secret scan, and public-file audit pass.
 
-- [ ] **Step 5: Commit and STOP GATE**
+- [x] **Step 5: Commit and STOP GATE**
 
 ```bash
 git add apps/web .github/workflows/demo-pages.yml README.md docs Makefile
@@ -1520,6 +1520,19 @@ git commit -m "feat: package read-only public demo"
 ```
 
 Report fixture provenance, no-write evidence, Pages workflow permissions, release-check result, and commit. Stop before any GitHub publication or account-system work. After the user authorizes publication, execute Release Task 6 Step 5; verify both the clean clone and the deployed Pages URL, including the sample citation interaction and absence of non-read network requests.
+
+Implementation notes (2026-09-08): Versioned/deep-frozen original CC0 Chinese
+fixture, complete local setup and repository-relative links, configurable Vite
+base and an approval-gated Pages workflow are implemented. Static production
+browser checks pass at two desktop sizes under a repository subpath with reset,
+no persistence, no API/write requests and citation/setup-link interactions.
+`make release-check` passed: 960 backend tests, 7 live skips; 60 frontend tests;
+48 evaluations; 14 existing desktop journeys (14 intentional mode skips) and
+2 additional static-demo journeys. Secret scan and independent review passed.
+Review's cross-branch deployment cancellation issue was fixed by branch-scoped
+concurrency. Workflow jobs remain disabled without explicit repository approval
+variable and a push to the actual default branch. No remote, push or deployment
+occurred; hosted CI/Pages/clean-clone confirmation remains after publication approval.
 
 ## Approved frontend specification coverage
 

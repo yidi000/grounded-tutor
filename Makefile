@@ -44,8 +44,16 @@ release-check: export EXTERNAL_MODE=fake
 release-check: export DEMO_READ_ONLY=false
 release-check: export ENABLE_LOCAL_ADMIN=false
 release-check: verify-learning
+	$(MAKE) demo-check
 	.venv/bin/python -c 'from grounded_tutor.main import app; assert app.title == "Grounded Tutor API"'
 	.venv/bin/python scripts/render_evaluation_report.py --check
 	bash scripts/check_secrets.sh
 	git diff --check
 	git diff --cached --check
+
+.PHONY: demo-build demo-check
+demo-build:
+	VITE_APP_MODE=demo_read_only npm --prefix apps/web run build
+
+demo-check:
+	npm --prefix apps/web exec -- playwright test --config=apps/web/playwright.demo.config.ts
