@@ -6,6 +6,8 @@
 
 ### 围绕你的资料学习，让每个回答都有据可查。
 
+Study your own materials, verify answers against their sources, and learn step by step.
+
 导入讲义与笔记 · 核对原文引用 · 循序学习与练习
 
 [![Release verification](https://github.com/yidi000/grounded-tutor/actions/workflows/ci.yml/badge.svg)](https://github.com/yidi000/grounded-tutor/actions/workflows/ci.yml)
