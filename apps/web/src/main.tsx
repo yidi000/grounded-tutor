@@ -1,4 +1,5 @@
 import "@fontsource/noto-sans-sc/400.css";
+import "@fontsource/noto-serif-sc/600.css";
 import "@fontsource/noto-sans-sc/600.css";
 import "@fontsource/noto-sans-sc/700.css";
 import "@fontsource/ibm-plex-mono/500.css";

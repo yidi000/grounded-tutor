@@ -19,21 +19,21 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `rm -f ${JSON.stringify(testDatabasePath)} && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} .venv/bin/alembic -c apps/api/alembic.ini upgrade head && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} EXTERNAL_MODE=fake .venv/bin/uvicorn e2e_app:app --app-dir apps/api/tests --host 127.0.0.1 --port 8000`,
+      command: `rm -f ${JSON.stringify(testDatabasePath)} && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} .venv/bin/alembic -c apps/api/alembic.ini upgrade head && DATABASE_URL=${JSON.stringify(testDatabaseUrl)} EXTERNAL_MODE=fake .venv/bin/uvicorn e2e_app:app --app-dir apps/api/tests --host 127.0.0.1 --port 8018`,
       cwd: "../..",
-      url: "http://127.0.0.1:8000/api/health",
+      url: "http://127.0.0.1:8018/api/health",
       reuseExistingServer: false,
       timeout: 30_000,
     },
     {
-      command: "npm run dev -- --host 127.0.0.1 --port 4173",
+      command: "API_PROXY_TARGET=http://127.0.0.1:8018 npm run dev -- --host 127.0.0.1 --port 4173",
       cwd: ".",
       url: "http://127.0.0.1:4173",
       reuseExistingServer: false,
       timeout: 30_000,
     },
     {
-      command: "VITE_APP_MODE=demo_read_only npm run dev -- --host 127.0.0.1 --port 4174",
+      command: "API_PROXY_TARGET=http://127.0.0.1:8018 VITE_APP_MODE=demo_read_only npm run dev -- --host 127.0.0.1 --port 4174",
       cwd: ".",
       url: "http://127.0.0.1:4174",
       reuseExistingServer: false,

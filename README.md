@@ -6,7 +6,7 @@ so the learner can examine where an answer came from.
 
 ## Capabilities
 
-Create topic Workspaces; import files or paste text; review and accept processed
+Create, rename and delete topic Workspaces; import files or paste text; review and accept processed
 sources; ask questions with numbered citations; restore saved history. Optional
 micro-diagnostics lead to finite learning plans, cited lessons and immediate
 checks. Pause a learning activity, ask a question, and resume its saved checkpoint.
@@ -74,12 +74,14 @@ under a repository subpath run `make demo-check`. `VITE_PUBLIC_BASE_PATH` contro
 the build base (default `/`). `make release-check` includes the nested-path demo
 checks. Pages packaging exists but no deployment URL is available yet.
 
-The Pages workflow stays disabled unless the owner explicitly approves publication
-and then sets repository variable `DEMO_PAGES_APPROVED=true`. It runs build/deploy
-jobs only on pushes to the actual default branch, obtains the base from Pages
-metadata, tests the static demo and uploads only `apps/web/dist`. Configure Pages
-to use GitHub Actions after approval. No FastGPT or model secret is supplied.
-See [publication readiness](docs/release-checklist.md).
+This release distributes source code for local deployment. No hosted service or
+public demo deployment is provided. The optional Pages workflow remains inactive;
+leave `DEMO_PAGES_APPROVED` unset. No FastGPT or model key belongs in GitHub or
+the frontend. See [release checks](docs/release-checklist.md).
+
+Deleting a topic permanently removes its cloud dataset and local sources, chat
+history and learning progress after confirmation. See [deletion behavior and
+retry handling](docs/workspace-deletion.md).
 
 ## Live FastGPT and model-provider setup
 

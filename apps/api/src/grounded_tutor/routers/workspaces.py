@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from grounded_tutor.dependencies import get_workspace_service
 from grounded_tutor.domain.schemas import (
@@ -13,6 +13,7 @@ from grounded_tutor.domain.schemas import (
 )
 from grounded_tutor.repositories.workspaces import WorkspacePersistenceError
 from grounded_tutor.routers.common import DEMO_WRITE_ERROR_RESPONSE, api_error, parse_uuid
+from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError
 from grounded_tutor.services.workspaces import (
     ExternalWorkspaceServiceError,
     UnsupportedWorkspaceModelError,
@@ -114,3 +115,28 @@ def rename_workspace(
         api_error(status.HTTP_404_NOT_FOUND, "workspace_not_found")
     except WorkspacePersistenceError:
         api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+
+
+@router.delete(
+    "/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        **CREATE_ERROR_RESPONSES,
+        404: {"model": ApiErrorResponse, "description": "Workspace ID is invalid."},
+        409: {"model": ApiErrorResponse, "description": "Workspace is busy."},
+    },
+)
+async def delete_workspace(
+    workspace_id: str,
+    service: Annotated[WorkspaceService, Depends(get_workspace_service)],
+) -> Response:
+    parsed_id = parse_uuid(workspace_id, "workspace_not_found")
+    try:
+        await service.delete(parsed_id)
+    except WorkspaceIngestionBusyError:
+        api_error(status.HTTP_409_CONFLICT, "workspace_ingestion_busy")
+    except ExternalWorkspaceServiceError:
+        api_error(status.HTTP_502_BAD_GATEWAY, "external_service_error")
+    except WorkspacePersistenceError:
+        api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "persistence_error")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

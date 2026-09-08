@@ -16,3 +16,6 @@ evals/reports/*
 !evals/reports/.gitkeep
 !evals/reports/public-p0.json
 !evals/reports/public-p0.md
+
+# Local design proposals and decision-tool state
+.impeccable/

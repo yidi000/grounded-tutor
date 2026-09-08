@@ -6,10 +6,11 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, delete, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from grounded_tutor.domain import models as m
 from grounded_tutor.domain.models import Source, SourceStatus, Workspace
 
 
@@ -133,6 +134,63 @@ class WorkspaceRepository:
                 outcome=WorkspacePersistenceOutcome.UNKNOWN_OR_COMMITTED
             ) from error
         return summary
+
+    def has_pending_request(self, workspace_id: UUID) -> bool:
+        try:
+            return self._session.scalar(select(m.RequestRecord.workspace_id).where(
+                m.RequestRecord.workspace_id == workspace_id,
+                m.RequestRecord.state == "pending",
+            ).limit(1)) is not None
+        except SQLAlchemyError as error:
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
+
+    def dataset_id(self, workspace_id: UUID) -> str | None:
+        try:
+            return self._session.scalar(
+                select(Workspace.dataset_id).where(Workspace.id == workspace_id)
+            )
+        except SQLAlchemyError as error:
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
+
+    def delete(self, workspace_id: UUID) -> None:
+        try:
+            conversations = select(m.Conversation.id).where(m.Conversation.workspace_id == workspace_id)
+            traces = select(m.ExecutionTrace.id).where(m.ExecutionTrace.workspace_id == workspace_id)
+            assessments = select(m.Assessment.id).where(m.Assessment.workspace_id == workspace_id)
+            self._session.execute(delete(m.Message).where(m.Message.conversation_id.in_(conversations)))
+            self._session.execute(delete(m.BadCase).where(m.BadCase.trace_id.in_(traces)))
+            for model in (m.DiagnosticQuestion, m.ImmediateCheck):
+                self._session.execute(delete(model).where(model.workspace_id == workspace_id))
+            self._session.execute(delete(m.Attempt).where(m.Attempt.assessment_id.in_(assessments)))
+            for model in (
+                m.Assessment, m.ActivityState, m.Lesson, m.PlanOrigin, m.Concept,
+                m.LearningPlan, m.Diagnostic, m.LearnerProfile, m.RequestRecord,
+                m.ExecutionTrace, m.Conversation,
+            ):
+                self._session.execute(delete(model).where(model.workspace_id == workspace_id))
+            # Break version links before deleting sources under RESTRICT foreign keys.
+            self._session.execute(update(Source).where(Source.workspace_id == workspace_id)
+                                  .values(replaces_source_id=None))
+            self._session.execute(delete(Source).where(Source.workspace_id == workspace_id))
+            self._session.execute(delete(Workspace).where(Workspace.id == workspace_id))
+        except SQLAlchemyError as error:
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.DEFINITELY_UNCOMMITTED
+            ) from error
+        try:
+            self._session.commit()
+        except SQLAlchemyError as error:
+            self._rollback()
+            raise WorkspacePersistenceError(
+                outcome=WorkspacePersistenceOutcome.UNKNOWN_OR_COMMITTED
+            ) from error
 
     def _get_summary(self, workspace_id: UUID) -> WorkspaceSummary | None:
         row = self._session.execute(

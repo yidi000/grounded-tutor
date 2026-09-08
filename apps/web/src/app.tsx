@@ -12,6 +12,7 @@ import { demoFixture } from "./demo/fixture";
 import { SourcePanel } from "./features/sources/source-panel";
 import { SourceWizard } from "./features/sources/source-wizard";
 import { TopicRail } from "./features/workspaces/topic-rail";
+import { DeleteWorkspaceDialog } from "./features/workspaces/delete-workspace-dialog";
 import { WorkspaceDialog } from "./features/workspaces/workspace-dialog";
 import { ChatView } from "./features/chat/chat-view";
 
@@ -34,6 +35,8 @@ function LocalNotebook() {
   const capabilities = useQuery({ queryKey: ["source-ingestion-capabilities"], queryFn: ({ signal }) => apiFetch(SourceIngestionCapabilitiesSchema, "/api/capabilities/source-ingestion", { signal }) });
   const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: ({ signal }) => api.listWorkspaces(signal), enabled: capabilities.isSuccess });
   const [currentId, setCurrentId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("workspace"));
+  const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceResponse | null>(null);
+  const allLearningPending = useIsMutating({ mutationKey: ["learning-write"] }) > 0;
   const [workspaceDialog, setWorkspaceDialog] = useState(false);
   const [wizard, setWizard] = useState<{ open: boolean; file?: File; source?: SourceResponse; intent?: "review" | "reprocess" }>({ open: false });
   // ponytail: retries survive topic switches, not page reloads; persist requests if reload recovery is needed.
@@ -98,6 +101,25 @@ function LocalNotebook() {
     }
   }
   async function refresh() { await Promise.all([queryClient.invalidateQueries({ queryKey: ["workspaces"] }), currentId ? queryClient.invalidateQueries({ queryKey: ["sources", currentId] }) : Promise.resolve()]); }
+  async function deletedWorkspace(id: string) {
+    await queryClient.cancelQueries({ queryKey: ["workspaces"] });
+    chatGeneration.current += 1;
+    setDeletingWorkspace(null);
+    const remaining = (workspaces.data ?? []).filter((item) => item.id !== id);
+    queryClient.setQueryData(["workspaces"], remaining);
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[1] === id });
+    delete retryRequests.current[id];
+    setDrafts(({ [id]: _removed, ...rest }) => rest);
+    setFailedAsks((items) => items.filter((item) => item !== id));
+    if (id === currentId) {
+      setCurrentId(remaining[0]?.id ?? null); dismissCitation();
+      const url = new URL(window.location.href);
+      if (remaining.length) url.searchParams.set("workspace", remaining[0].id);
+      else url.searchParams.delete("workspace");
+      window.history.replaceState(null, "", url);
+    }
+    window.setTimeout(() => document.querySelector<HTMLButtonElement>(".rail-add")?.focus(), 0);
+  }
   function upsert(workspace: WorkspaceResponse) { queryClient.setQueryData<WorkspaceResponse[]>(["workspaces"], (items = []) => items.some((item) => item.id === workspace.id) ? items.map((item) => item.id === workspace.id ? workspace : item) : [...items, workspace]); }
   function addWorkspace(workspace: WorkspaceResponse) { upsert(workspace); selectWorkspace(workspace); }
 
@@ -119,10 +141,11 @@ function LocalNotebook() {
   return <>
     <AppShell
       headerActions={capabilities.isSuccess ? <div className="top-actions"><span className="workspace-mode">本地工作区</span><button className="primary-button compact" type="button" onClick={() => current && openWizard()} disabled={!current}>添加资料</button></div> : undefined}
-      topicRail={<TopicRail mode="local" workspaces={workspaces.data} currentId={currentId} onSelect={selectWorkspace} onCreate={capabilities.isSuccess ? () => { rememberTrigger(); setWorkspaceDialog(true); } : undefined} onRenamed={upsert} />}
+      topicRail={<TopicRail mode="local" workspaces={workspaces.data} currentId={currentId} onSelect={selectWorkspace} onCreate={capabilities.isSuccess ? () => { rememberTrigger(); setWorkspaceDialog(true); } : undefined} onRenamed={upsert} deleteDisabled={pendingAsks.length > 0 || allLearningPending || wizard.open} onDelete={(workspace) => { rememberTrigger(); setDeletingWorkspace(workspace); }} />}
       conversation={<ConversationSurface intro={intro} activity={<>{current && chatHistory.isFetching && <p role="status">正在读取历史对话…</p>}{current && chatHistory.isError && <div className="insufficient-state" role="alert"><p>暂时无法读取历史对话</p><button type="button" onClick={() => void chatHistory.refetch()}>重新加载对话</button></div>}{exchanges.length ? <ChatView exchanges={exchanges} selectedBlockId={selectedBlockId} onAddSource={() => openWizard()} onRephrase={() => document.getElementById("study-question")?.focus()} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} /> : null}{current && <LearningWorkspace key={current.id} workspaceId={current.id} title={current.title} chatPending={pendingAsks.includes(current.id)} retries={learningRetries.current} onSelectCitation={(nextCitation, blockId, anchor) => { citationTrigger.current = anchor; setCitation(nextCitation); setSelectedBlockId(blockId); }} />}</>} onFileDrop={current && capabilities.data ? (file) => openWizard({ file }) : undefined}><Composer key={current?.id ?? "no-workspace"} mode="local" draft={drafts[currentId ?? ""] ?? ""} onDraftChange={(draft) => setDrafts((items) => ({ ...items, [currentId ?? ""]: draft }))} failed={failedAsks.includes(currentId ?? "")} ready={readyCount > 0} blocked={learningPending || !chatHistory.isSuccess || chatHistory.isFetching || pendingAsks.includes(currentId ?? "")} onSubmit={ask} /></ConversationSurface>}
       contextPanel={<ContextPanel citation={citation} onCloseCitation={closeCitation} onDismissCitation={dismissCitation} sources={current ? <SourcePanel workspaceId={current.id} onReview={(source) => openWizard({ source, intent: "review" })} onReprocess={(source) => openWizard({ source, intent: "reprocess" })} /> : undefined} />}
     />
+    {deletingWorkspace && <DeleteWorkspaceDialog workspace={deletingWorkspace} onDeleted={deletedWorkspace} onClose={() => { setDeletingWorkspace(null); window.setTimeout(() => lastTrigger.current?.focus(), 0); }} />}
     {capabilities.data && <WorkspaceDialog open={workspaceDialog} capabilities={capabilities.data} onClose={closeWorkspaceDialog} onCreated={addWorkspace} />}
     {capabilities.data && current && <SourceWizard key={`${wizard.open}-${wizard.source?.id ?? "new"}-${wizard.file?.name ?? ""}`} workspaceId={current.id} capabilities={capabilities.data} open={wizard.open} initialFile={wizard.file} existingSource={wizard.source} intent={wizard.intent} onClose={closeWizard} onChanged={() => { void refresh(); }} />}
   </>;

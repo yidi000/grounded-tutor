@@ -342,6 +342,21 @@ class FastGPTClient:
             failure_category = "network"
         if failure_category is not None:
             raise _failure(failure_category, "FastGPT request failed.")
+        # FastGPT DatasetErrEnum.unExist is a specific authenticated dataset lookup
+        # result, not a generic HTTP 404. Only deletion treats it as idempotent.
+        if method == "DELETE" and path == "/api/core/dataset/delete" and response.status_code in (200, 400, 500):
+            try:
+                deletion_result = response.json()
+            except (ValueError, UnicodeDecodeError):
+                deletion_result = None
+            if (
+                isinstance(deletion_result, dict)
+                and deletion_result.get("code") == 501002
+                and deletion_result.get("statusText") == "unExistDataset"
+                and "data" in deletion_result
+                and deletion_result["data"] is None
+            ):
+                return None
         if not response.is_success:
             raise _failure("http_status", "FastGPT returned an unsuccessful HTTP status.")
         invalid_json = False

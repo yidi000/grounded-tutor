@@ -104,3 +104,33 @@ Final local package gate (2026-09-08): exit 0, 960 backend passed/7 live skipped
 passed/14 mode skips, and 2 static-demo journeys passed. Gitleaks history plus
 staged/working tracked snapshots, API import, report check and build passed.
 Independent review passed after fixing cross-branch deployment cancellation.
+
+## Source-only release candidate (2026-09-08)
+
+The owner selected source distribution for local deployment only. No hosted
+service or Pages deployment is in scope; keep DEMO_PAGES_APPROVED unset.
+
+The candidate includes the limestone/burgundy desktop redesign, confirmed topic
+deletion with scoped cloud/local cleanup, and isolated E2E ports. Temporary
+Impeccable images and question state are ignored; PRODUCT.md and DESIGN.md record
+the approved product and design direction.
+
+Fresh `make release-check` exited 0: backend980 passed/7 opted-out live skips,
+frontend69 passed, 40 ASK and8 learning evaluations passed, desktop18 passed
+with18 cross-mode skips, and2 static-demo browser tests passed. Ruff, production
+build, API import, report consistency and staged/working whitespace checks passed.
+Gitleaks8.30.1 scanned57 historical commits plus staged and working tracked
+snapshots without findings. The public-file guard reported0 blocked entries.
+
+These checks are deterministic and do not make new live-model quality claims.
+GitHub remote creation, push and hosted CI remain outside this local commit step.
+
+A clean source export used fresh Python3.13.12 dependencies, template-only fake
+settings and a new SQLite database: all11 migrations, API import, CRUD smoke and
+8 deletion tests passed. Fresh npm installation initially exposed undeclared
+Node typings (TS2591). Added pinned @types/node24.13.3 and explicit Node types;
+a second clean npm ci and cache-free production build passed. Frontend69 tests
+and forced TypeScript rebuild also passed after that fix; secret scans were
+repeated successfully. The available host used Node25.9.0/npm11.12.1, so Node24
+specifically remains unverified locally. No real configuration or database was
+copied into the clean export.

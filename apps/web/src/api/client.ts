@@ -61,6 +61,10 @@ const json = (body: unknown): RequestInit => ({
 export const api = {
   listWorkspaces: (signal?: AbortSignal) =>
     apiFetch(z.array(WorkspaceResponseSchema), "/api/workspaces", { signal }),
+  deleteWorkspace: async (id: string) => {
+    const response = await fetch(`/api/workspaces/${id}`, { method: "DELETE" });
+    if (!response.ok) throw new ApiError(response.status, "external_service_error");
+  },
   createWorkspace: (payload: Pick<WorkspaceCreate, "title"> & Partial<Omit<WorkspaceCreate, "title">>) =>
     apiFetch(WorkspaceResponseSchema, "/api/workspaces", json(payload)),
   renameWorkspace: (id: string, payload: WorkspaceUpdate) =>

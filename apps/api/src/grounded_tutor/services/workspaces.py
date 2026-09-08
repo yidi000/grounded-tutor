@@ -10,6 +10,7 @@ from grounded_tutor.repositories.workspaces import (
     WorkspaceRepository,
     WorkspaceSummary,
 )
+from grounded_tutor.services.source_locks import WorkspaceIngestionBusyError, WorkspaceLockRegistry
 
 
 class WorkspaceNotFoundError(LookupError):
@@ -30,10 +31,12 @@ class WorkspaceService:
         repository: WorkspaceRepository,
         fastgpt: FastGPTPort,
         settings: Settings | None = None,
+        locks: WorkspaceLockRegistry | None = None,
     ) -> None:
         self._repository = repository
         self._fastgpt = fastgpt
         self._settings = settings or Settings()
+        self._locks = locks or WorkspaceLockRegistry()
 
     async def create(
         self,
@@ -103,3 +106,16 @@ class WorkspaceService:
         if workspace is None:
             raise WorkspaceNotFoundError
         return workspace
+
+    async def delete(self, workspace_id: UUID) -> None:
+        async with self._locks.acquire(workspace_id):
+            dataset_id = self._repository.dataset_id(workspace_id)
+            if dataset_id is None:
+                return
+            if self._repository.has_pending_request(workspace_id):
+                raise WorkspaceIngestionBusyError
+            try:
+                await self._fastgpt.delete_dataset(dataset_id)
+            except Exception as error:
+                raise ExternalWorkspaceServiceError("Dataset deletion failed.") from error
+            self._repository.delete(workspace_id)

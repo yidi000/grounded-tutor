@@ -975,3 +975,36 @@ async def test_import_failure_logs_only_safe_category_without_retry(respx_mock, 
     assert route.call_count == 1
     assert "FastGPT failure category=timeout" in caplog.text
     assert "private" not in caplog.text
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize('http_status', [200, 400, 500])
+async def test_delete_dataset_accepts_only_specific_missing_dataset(http_status):
+    respx.delete('https://fastgpt.test/api/core/dataset/delete').mock(
+        return_value=httpx.Response(http_status, json={
+            'code': 501002, 'statusText': 'unExistDataset', 'message': 'Missing', 'data': None,
+        })
+    )
+    client = FastGPTClient('https://fastgpt.test', 'secret')
+    await client.delete_dataset('gone')
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize('http_status,payload', [
+    (404, {'code': 404, 'message': 'Not found'}),
+    (401, {'code': 501002, 'statusText': 'unExistDataset'}),
+    (403, {'code': 501002, 'statusText': 'unExistDataset'}),
+    (500, {'code': 501002, 'statusText': 'permissionDenied'}),
+    (500, {'code': 500, 'statusText': 'unExistDataset'}),
+])
+async def test_delete_dataset_does_not_swallow_other_failures(http_status, payload):
+    respx.delete('https://fastgpt.test/api/core/dataset/delete').mock(
+        return_value=httpx.Response(http_status, json=payload)
+    )
+    client = FastGPTClient('https://fastgpt.test', 'secret')
+    with pytest.raises(ExternalServiceError):
+        await client.delete_dataset('gone')
+    await client.aclose()

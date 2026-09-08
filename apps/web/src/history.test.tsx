@@ -1,3 +1,4 @@
+import { focusManager } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
@@ -162,4 +163,41 @@ it("keeps ready conversations compact with one global add-material action", asyn
   expect(screen.queryByRole("button", { name: "＋ 添加资料" })).not.toBeInTheDocument();
   await userEvent.click(within(header).getByRole("button", { name: "添加资料" }));
   expect(screen.getByRole("dialog", { name: "添加学习资料" })).toBeVisible();
+});
+
+it("deleting the last topic clears saved answers, citation and the URL", async () => {
+  const user = userEvent.setup();
+  let exists = true;
+  let holdList = false;
+  let releaseList: (() => void) | undefined;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "DELETE") { exists = false; return new Response(null, { status: 204 }); }
+    if (url.includes("capabilities")) return Response.json({ accepted_extensions: [".txt"], max_upload_bytes: 10000, settings: [], workspace_models: [], read_only_demo: false });
+    if (url === "/api/workspaces") {
+      const snapshot = exists;
+      if (holdList) await new Promise<void>((resolve) => { releaseList = resolve; });
+      return Response.json(snapshot ? [{ id: ids[0], title: "Only topic", source_count: 1, ready_source_count: 1, model_choices: { vector_model: null, agent_model: null, vlm_model: null }, created_at: "2026-09-07T00:00:00Z", updated_at: "2026-09-07T00:00:00Z" }] : []);
+    }
+    if (url.endsWith("/chat/history")) return Response.json(history("A"));
+    if (url.endsWith("/sources")) return Response.json([]);
+    if (url.endsWith("/plans")) return Response.json({ plans: [] });
+    if (url.endsWith("/diagnostics/invitation")) return Response.json(null);
+    return Response.json({ snapshot: { active_mode: "ASK", active_concept_id: null, checkpoint: null, suspended_activity: null }, kind: "idle", checkpoint: null, resume_action: null, concept: null, plan: null, diagnostic: null, lesson: null, check: null });
+  }));
+  render(<App mode="local" />);
+  expect(await screen.findByText("Answer A")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: /引用 1/ }));
+  holdList = true;
+  act(() => { focusManager.setFocused(false); focusManager.setFocused(true); });
+  await waitFor(() => expect(releaseList).toBeDefined());
+  await user.click(screen.getByRole("button", { name: "删除学习主题：Only topic" }));
+  await user.click(screen.getByRole("button", { name: "永久删除" }));
+  expect(await screen.findByRole("heading", { name: "先建立一个学习主题" })).toBeVisible();
+  expect(screen.queryByText("Answer A")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "关闭引用详情" })).not.toBeInTheDocument();
+  await act(async () => { releaseList!(); await new Promise((resolve) => setTimeout(resolve, 50)); });
+  expect(screen.queryByRole("button", { name: "删除学习主题：Only topic" })).not.toBeInTheDocument();
+  expect(window.location.search).toBe("");
+  expect(screen.getByLabelText("向资料提问")).toBeDisabled();
 });

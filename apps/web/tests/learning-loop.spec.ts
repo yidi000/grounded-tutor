@@ -2,11 +2,11 @@ import { expect, test } from "@playwright/test";
 
 test("learning consent, diagnostic, plan, check detour and reload recovery", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("local-"));
-  const created = await page.request.post("http://127.0.0.1:8000/api/workspaces", { data: { title: `Learning ${info.project.name}` } });
+  const created = await page.request.post("/api/workspaces", { data: { title: `Learning ${info.project.name}` } });
   const workspace = await created.json();
   const otherTitle = `Other ${info.project.name}`;
-  await page.request.post("http://127.0.0.1:8000/api/workspaces", { data: { title: otherTitle } });
-  const base = `http://127.0.0.1:8000/api/workspaces/${workspace.id}`;
+  await page.request.post("/api/workspaces", { data: { title: otherTitle } });
+  const base = `/api/workspaces/${workspace.id}`;
   const upload = await page.request.post(`${base}/sources/text`, { data: { source_name: "Statistics notes", text: "Mean is sum divided by count. Median is the middle value. Mode is the most frequent value.", settings: {} } });
   expect(upload.ok()).toBeTruthy();
   await page.request.post(`${base}/sources/${(await upload.json()).source.id}/accept`);
@@ -81,8 +81,8 @@ test("learning consent, diagnostic, plan, check detour and reload recovery", asy
 
 test("dismissed invitation stays dismissed after reload and later questions", async ({ page }, info) => {
   test.skip(!info.project.name.startsWith("local-"));
-  const workspace = await (await page.request.post("http://127.0.0.1:8000/api/workspaces", { data: { title: `Dismiss ${info.project.name}` } })).json();
-  const base = `http://127.0.0.1:8000/api/workspaces/${workspace.id}`;
+  const workspace = await (await page.request.post("/api/workspaces", { data: { title: `Dismiss ${info.project.name}` } })).json();
+  const base = `/api/workspaces/${workspace.id}`;
   const upload = await (await page.request.post(`${base}/sources/text`, { data: { source_name: "Notes", text: "Mean is sum divided by count.", settings: {} } })).json();
   await page.request.post(`${base}/sources/${upload.source.id}/accept`);
   await page.goto(`/?workspace=${workspace.id}`);
