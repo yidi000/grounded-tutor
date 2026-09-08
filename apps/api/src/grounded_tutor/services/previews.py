@@ -872,7 +872,9 @@ def _require_positive_limit(limit: int) -> None:
 
 
 def _segments(text: str, settings: ChunkSettings) -> Iterator[str]:
-    split_mode = "paragraph" if settings.setting_mode == "auto" else settings.split_mode
+    if settings.setting_mode == "auto":
+        settings = ChunkSettings()
+    split_mode = settings.split_mode
     if split_mode == "size":
         yield from _split_to_size(text, settings.chunk_size)
         return

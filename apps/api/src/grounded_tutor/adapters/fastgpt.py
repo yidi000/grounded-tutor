@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, Self
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +151,7 @@ class FastGPTClient:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
-        self._client = client or httpx.AsyncClient()
+        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(5, read=30, write=30))
         self._owns_client = client is None
 
     def __repr__(self) -> str:
@@ -455,6 +458,7 @@ def _malformed() -> None:
 
 
 def _failure(category: str, safe_message: str) -> ExternalServiceError:
+    logger.warning("FastGPT failure category=%s", category)
     return ExternalServiceError(service="fastgpt", category=category, safe_message=safe_message)
 
 

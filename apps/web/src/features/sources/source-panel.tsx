@@ -6,7 +6,6 @@ import type { SourceResponse } from "../../api/types";
 
 type SourcePanelProps = {
   workspaceId: string;
-  onAdd: () => void;
   onReview: (source: SourceResponse) => void;
   onReprocess: (source: SourceResponse) => void;
 };
@@ -20,7 +19,7 @@ const STATUS_LABEL = {
   failed: "处理失败",
 } as const;
 
-export function SourcePanel({ workspaceId, onAdd, onReview, onReprocess }: SourcePanelProps) {
+export function SourcePanel({ workspaceId, onReview, onReprocess }: SourcePanelProps) {
   const queryClient = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState(false);
@@ -41,10 +40,10 @@ export function SourcePanel({ workspaceId, onAdd, onReview, onReprocess }: Sourc
 
   return (
     <div className="source-panel">
-      <div className="source-panel-heading"><div><span className="eyebrow">资料库</span><h2>全部资料</h2></div><button className="small-button" type="button" onClick={onAdd}>添加</button></div>
+      <div className="source-panel-heading"><h2>全部资料</h2><span className="status-label">{current.length} 份</span></div>
       {sources.isPending && <p className="panel-message">正在读取资料</p>}
       {sources.isError && <p className="form-error">暂时无法读取资料，请稍后重试。</p>}
-      {!sources.isPending && current.length === 0 && <div className="context-empty"><span className="context-glyph" aria-hidden="true">资</span><h3>还没有学习资料</h3><p>上传讲义或粘贴笔记，处理后先复核再用于问答。</p><button className="text-button" type="button" onClick={onAdd}>添加第一份资料</button></div>}
+      {!sources.isPending && current.length === 0 && <div className="context-empty"><h3>还没有学习资料</h3><p>上传讲义或粘贴笔记，处理后先复核再用于问答。</p><p>使用右上角“添加资料”开始。</p></div>}
       <div className="source-list">
         {current.map((source) => (
           <article className="source-card" key={source.id}>

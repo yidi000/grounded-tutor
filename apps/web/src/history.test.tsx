@@ -150,3 +150,16 @@ it.each([false, true])("retains a pending draft and reports failure after select
   expect(screen.getByLabelText("向资料提问")).toHaveValue("Keep this question");
   expect(await screen.findByRole("alert")).toHaveTextContent("当前无法完成提问");
 });
+
+it("keeps ready conversations compact with one global add-material action", async () => {
+  serve(() => Response.json(history("A")));
+  render(<App mode="local" />);
+  await screen.findByText("Answer A");
+  const header = screen.getByRole("banner");
+  expect(within(header).getByRole("button", { name: "添加资料" })).toBeVisible();
+  expect(within(header).getAllByRole("button")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "上传本地资料" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "＋ 添加资料" })).not.toBeInTheDocument();
+  await userEvent.click(within(header).getByRole("button", { name: "添加资料" }));
+  expect(screen.getByRole("dialog", { name: "添加学习资料" })).toBeVisible();
+});

@@ -940,3 +940,38 @@ async def test_client_closes_only_client_it_owns() -> None:
     await borrowed.aclose()
     assert not injected.is_closed
     await injected.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["read", "write"])
+async def test_owned_client_allows_slow_import_without_replaying(respx_mock, phase):
+    def respond(request):
+        timeouts = request.extensions["timeout"]
+        if timeouts[phase] < 6:
+            raise httpx.TimeoutException("synthetic slow import", request=request)
+        assert timeouts == {"connect": 5, "read": 30, "write": 30, "pool": 5}
+        return httpx.Response(200, json={
+            "code": 200, "data": {"collectionId": "probe", "results": {"insertLen": 1}}
+        })
+
+    route = respx_mock.post("https://fastgpt.test/api/core/dataset/collection/create/localFile").mock(
+        side_effect=respond
+    )
+    async with FastGPTClient("https://fastgpt.test", "secret") as client:
+        result = await client.create_file_collection("dataset", "probe.csv", b"q,a\na,b", {})
+    assert result.collection_id == "probe"
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_import_failure_logs_only_safe_category_without_retry(respx_mock, caplog):
+    route = respx_mock.post("https://fastgpt.test/api/core/dataset/collection/create/localFile").mock(
+        side_effect=httpx.ReadTimeout("private provider detail")
+    )
+    async with FastGPTClient("https://fastgpt.test", "private-api-key") as client:
+        with pytest.raises(ExternalServiceError) as caught:
+            await client.create_file_collection("private-id", "private-name.csv", b"private-body", {})
+    assert caught.value.category == "timeout"
+    assert route.call_count == 1
+    assert "FastGPT failure category=timeout" in caplog.text
+    assert "private" not in caplog.text

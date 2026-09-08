@@ -6,7 +6,7 @@ for (const filename of ["slides.pptx", "workbook.xlsx"]) {
     test.skip(!testInfo.project.name.startsWith("local-"));
     await page.goto("/");
     await createWorkspace(page, `${filename} ${testInfo.project.name}`);
-    await page.getByRole("button", { name: "＋ 添加资料" }).click();
+    await page.getByRole("banner").getByRole("button", { name: "添加资料", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "添加学习资料" });
     await dialog.locator('input[type="file"]').setInputFiles(fileURLToPath(new URL(`../../api/tests/fixtures/${filename}`, import.meta.url)));
     await dialog.getByRole("button", { name: "查看预计片段" }).click();
@@ -156,11 +156,28 @@ async function createWorkspace(page: Page, title: string) {
 }
 
 async function pasteAndAccept(page: Page, name: string, content: string, testInfo: TestInfo, pendingPreview = true) {
-  await page.getByRole("button", { name: "粘贴文本", exact: true }).click();
+  await page.getByRole("banner").getByRole("button", { name: "添加资料", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "添加学习资料" });
   await dialog.getByRole("button", { name: "粘贴文本", exact: true }).click();
   await dialog.getByLabel("资料名称").fill(name);
   await dialog.getByLabel("资料内容").fill(content);
+  await dialog.getByRole("button", { name: "高级设置", exact: true }).click();
+  await expect(dialog.getByLabel("自定义分隔符")).toBeDisabled();
+  await expect(dialog.getByLabel("问答提取要求")).toBeDisabled();
+  await expect(dialog.getByLabel("自定义分隔符")).toHaveAccessibleDescription(/选择.*自定义.*指定分隔符/);
+  await dialog.getByLabel("分块规则").selectOption("custom");
+  await dialog.getByLabel("分段方式").selectOption("char");
+  await dialog.getByLabel("自定义分隔符").fill("###");
+  await expect(dialog.getByLabel("自定义分隔符")).toBeEnabled();
+  await dialog.getByLabel("保存方式").selectOption("qa");
+  await expect(dialog.getByLabel("问答提取要求")).toBeEnabled();
+  await dialog.getByLabel("问答提取要求").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("settings-custom.png") });
+  await dialog.getByLabel("分块规则").selectOption("auto");
+  await dialog.getByLabel("保存方式").selectOption("chunk");
+  await dialog.getByLabel("问答提取要求").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("settings-disabled.png") });
+  await dialog.getByRole("button", { name: "高级设置", exact: true }).click();
   await dialog.getByRole("button", { name: "查看预计片段" }).click();
   await expect(dialog.getByText("本地估算")).toBeVisible();
   await dialog.getByRole("button", { name: "确认处理" }).click();
@@ -187,3 +204,33 @@ async function expectDesktopContract(page: Page) {
   expect(layout.scroll).toBe(layout.viewport);
   expect(layout.center).toBeGreaterThanOrEqual(640);
 }
+
+test("local failed import preserves the preview step and recovers on manual retry", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.name.startsWith("local-"));
+  await page.goto("/");
+  await createWorkspace(page, `Import recovery ${testInfo.project.name}`);
+  await page.getByRole("banner").getByRole("button", { name: "添加资料", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "添加学习资料" });
+  await dialog.getByRole("button", { name: "粘贴文本", exact: true }).click();
+  await dialog.getByLabel("资料内容").fill("Retrieval finds relevant evidence.");
+  await dialog.getByRole("button", { name: "查看预计片段" }).click();
+  let imports = 0;
+  await page.route("**/sources/text", async (route) => {
+    imports += 1;
+    if (imports === 1) await route.fulfill({ status: 502, json: { detail: { code: "external_service_error" } } });
+    else await route.continue();
+  });
+  await dialog.getByRole("button", { name: "确认处理" }).click();
+  await expect(dialog.getByRole("heading", { name: "资料导入没有完成" })).toBeVisible();
+  await expect(dialog.locator('[aria-current="step"]')).toHaveText("预计片段");
+  await expect(dialog.getByRole("alert")).toContainText("输入和设置已保留");
+  await page.screenshot({ path: testInfo.outputPath("import-error.png") });
+  await dialog.getByRole("button", { name: "返回重试" }).click();
+  await expect(dialog.getByText("Retrieval finds relevant evidence.", { exact: true })).toBeVisible();
+  expect(imports).toBe(1);
+  await dialog.getByRole("button", { name: "确认处理" }).click();
+  await expect(dialog.getByText("实际处理结果")).toBeVisible();
+  await dialog.getByRole("button", { name: "接受并用于问答" }).click();
+  await expect(dialog.getByText("资料已准备好")).toBeVisible();
+  expect(imports).toBe(2);
+});

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -57,7 +57,7 @@ describe("SourceWizard", () => {
     expect(await screen.findByRole("button", { name: "接受并用于问答" })).toBeDisabled();
     expect(screen.getByText(/可能仍在处理/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "刷新处理结果" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("当前无法完成");
+    expect(await screen.findByRole("alert")).toHaveTextContent("资料服务");
     await user.click(screen.getByRole("button", { name: "返回重试" }));
     expect(await screen.findByText("资料内容")).toBeVisible();
     expect(screen.getByRole("button", { name: "接受并用于问答" })).toBeEnabled();
@@ -82,6 +82,7 @@ describe("SourceWizard", () => {
     expect(screen.getByText("推荐设置")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "高级设置" }));
     expect(screen.getByLabelText("片段长度")).toBeVisible();
+    await user.click(within(screen.getByLabelText("片段长度").parentElement!).getByText("设置建议"));
     expect(screen.getByText(/影响每个片段保留多少上下文/)).toBeVisible();
     expect(screen.getAllByText(/推荐/).length).toBeGreaterThan(1);
     expect(screen.getByLabelText("问答提取要求")).toBeVisible();
@@ -91,6 +92,58 @@ describe("SourceWizard", () => {
     expect(screen.getByLabelText("自定义分隔符")).toBeVisible();
     expect(screen.getByLabelText("将标题加入索引")).toBeVisible();
     expect(screen.getByLabelText("索引内容长度")).toBeVisible();
+  });
+
+  it("explains inactive settings and reports the actual selected configuration", async () => {
+    const user = userEvent.setup();
+    render(<SourceWizard workspaceId={source.workspace_id} capabilities={capabilities} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "粘贴文本" }));
+    await user.click(screen.getByRole("button", { name: "高级设置" }));
+    expect(screen.getByLabelText("分段方式")).toBeDisabled();
+    expect(screen.getByLabelText("片段长度")).toBeDisabled();
+    expect(screen.getByLabelText("索引内容长度")).toBeDisabled();
+    expect(screen.getByLabelText("自定义分隔符")).toHaveAccessibleDescription(/选择.*自定义.*指定分隔符/);
+    expect(screen.getByLabelText("问答提取要求")).toHaveAccessibleDescription(/选择.*问答对/);
+    await user.selectOptions(screen.getByLabelText("分块规则"), "custom");
+    await user.selectOptions(screen.getByLabelText("分段方式"), "char");
+    expect(screen.getByLabelText("自定义分隔符")).toBeEnabled();
+    expect(screen.getByLabelText("自定义分隔符")).toHaveAttribute("placeholder", expect.stringContaining("###"));
+    await user.type(screen.getByLabelText("自定义分隔符"), "###");
+    await user.selectOptions(screen.getByLabelText("保存方式"), "qa");
+    expect(screen.getByLabelText("问答提取要求")).toBeEnabled();
+    expect(screen.getByLabelText("问答提取要求")).toHaveAccessibleDescription(/可选/);
+    expect(screen.getByRole("status", { name: "当前处理设置" })).toHaveTextContent("问答对 · 自定义 · 按指定分隔符");
+    await user.selectOptions(screen.getByLabelText("分块规则"), "auto");
+    expect(screen.getByLabelText("自定义分隔符")).toBeDisabled();
+    expect(screen.getByRole("status", { name: "当前处理设置" })).toHaveTextContent("问答对 · 系统推荐");
+  });
+
+  it("ignores inactive custom values on submit without losing them when switching back", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ authority: "estimated", source_name: "学习笔记", character_count: 4, items: [], warnings: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SourceWizard workspaceId={source.workspace_id} capabilities={capabilities} open onClose={vi.fn()} onChanged={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "粘贴文本" }));
+    await user.type(screen.getByLabelText("资料内容"), "课程笔记");
+    await user.click(screen.getByRole("button", { name: "高级设置" }));
+    await user.selectOptions(screen.getByLabelText("分块规则"), "custom");
+    await user.clear(screen.getByLabelText("片段长度"));
+    await user.type(screen.getByLabelText("片段长度"), "50");
+    await user.selectOptions(screen.getByLabelText("分块规则"), "auto");
+    await user.click(screen.getByRole("button", { name: "查看预计片段" }));
+    expect(await screen.findByText("本地估算")).toBeVisible();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).settings).toMatchObject({ chunkSize: 1000, indexSize: 256, chunkSplitMode: "paragraph", chunkSplitter: "" });
+    await user.click(screen.getByRole("button", { name: "调整设置" }));
+    await user.click(screen.getByRole("button", { name: "高级设置" }));
+    await user.selectOptions(screen.getByLabelText("分块规则"), "custom");
+    expect(screen.getByLabelText("片段长度")).toHaveValue(50);
+    await user.click(screen.getByRole("button", { name: "高级设置" }));
+    await user.click(screen.getByRole("button", { name: "查看预计片段" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("片段长度");
+    await waitFor(() => expect(screen.getByLabelText("片段长度")).toHaveFocus());
+    expect(screen.getByLabelText("资料内容")).toHaveValue("课程笔记");
+    await user.clear(screen.getByLabelText("片段长度"));
+    expect(screen.getByLabelText("片段长度")).toBeVisible();
   });
 
   it("moves focus inside and closes with Escape", async () => {
@@ -207,7 +260,8 @@ describe("SourceWizard", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<SourceWizard workspaceId={source.workspace_id} capabilities={capabilities} open existingSource={source} intent="review" onClose={vi.fn()} onChanged={vi.fn()} />);
     await user.click(await screen.findByRole("button", { name: "接受并用于问答" }));
-    expect(await screen.findByText(/当前无法完成/)).toBeVisible();
+    expect(await screen.findByText(/当前无法完成|资料服务/)).toBeVisible();
+    expect(within(screen.getByRole("list", { name: "处理步骤" })).getByText("实际复核")).toHaveAttribute("aria-current", "step");
     await user.click(screen.getByRole("button", { name: "返回重试" }));
     expect(screen.getByText("实际处理结果")).toBeVisible();
     expect(screen.getByRole("button", { name: "接受并用于问答" })).toBeVisible();

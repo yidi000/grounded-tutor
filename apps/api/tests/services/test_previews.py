@@ -230,7 +230,7 @@ def test_automatic_mode_ignores_inactive_custom_split_mode() -> None:
         ChunkSettings(setting_mode="auto", split_mode="size", chunk_size=100, index_size=32),
     )
 
-    assert [item.character_count for item in preview.items] == [100, 50, 7]
+    assert [item.character_count for item in preview.items] == [150, 7]
     assert preview.items[-1].text == "Second."
 
 
@@ -600,3 +600,13 @@ def test_malformed_or_unreadable_file_raises_stable_safe_error(
     public = f"{caught.value!r} {caught.value}"
     assert caught.value.code == "unreadable_file"
     assert "parser-private-marker" not in public
+
+
+def test_automatic_preview_ignores_cached_custom_chunk_length() -> None:
+    text = "a" * 1200
+    cached_custom = ChunkSettings(
+        setting_mode="auto", split_mode="char", splitter="a", chunk_size=100, index_size=32
+    )
+    preview = preview_text(text, cached_custom)
+    assert preview == preview_text(text, ChunkSettings())
+    assert [item.character_count for item in preview.items] == [1000, 200]
