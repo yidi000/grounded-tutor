@@ -39,8 +39,9 @@ Playwright journeys. Playwright explicitly runs `apps/api/tests/e2e_app.py`, whi
 supplies deterministic educational fixtures only to the test server. These are
 software behavior checks, not measurements of live model teaching quality.
 
-The deployed FastGPT application has been verified for ASK in earlier work. Its
-learning generation contracts (diagnostic questions, plans, checks) still require
-live configuration and integration verification before claiming the entire new
-learning loop works with the cloud model. This task does not publish a remote
-workflow or call live model APIs.
+The dedicated FastGPT application was updated and published on 2026-09-08.
+Live integration tests passed for diagnostic, plan, lesson, both check contracts,
+and an imported synthetic source through plan completion, including ASK and resume.
+These tests exercise real cloud retrieval and generation through local services;
+the desktop Playwright journeys still use deterministic fixtures. This is bounded
+integration evidence, not a general assessment of model teaching quality.

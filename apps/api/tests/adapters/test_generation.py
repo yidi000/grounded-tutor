@@ -208,3 +208,37 @@ async def test_diagnostic_adapter_rejects_ask_shape_and_concatenated_json():
         adapter = OpenAICompatibleGenerationClient('https://llm.test/v1', 'secret', 'model', client=http)
         with pytest.raises(InvalidGenerationOutput):
             await adapter.generate_diagnostic('goal', None, _request().chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "expected"),
+    [
+        ("answer", "blocks array"),
+        ("diagnostic", "questions array"),
+        ("plan", "concepts array"),
+        ("check", "question object"),
+    ],
+)
+async def test_user_envelope_carries_output_contract_for_workflow_gateways(operation, expected):
+    seen = []
+
+    async def handler(request):
+        seen.append(json.loads(json.loads(request.content)["messages"][1]["content"]))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = OpenAICompatibleGenerationClient(
+            "https://llm.test/v1", "secret", "model", client=http
+        )
+        with pytest.raises(InvalidGenerationOutput):
+            if operation == "answer":
+                await client.generate_content(_request())
+            elif operation == "diagnostic":
+                await client.generate_diagnostic("goal", None, _request().chunks)
+            elif operation == "plan":
+                await client.generate_plan("goal", {}, _request().chunks)
+            else:
+                await client.generate_check("objective", "single_choice", _request().chunks)
+    assert expected in seen[0]["output_contract"]
+    assert "output_contract" not in seen[0]["SOURCE_MATERIAL"]

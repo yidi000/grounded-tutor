@@ -53,6 +53,10 @@ async def test_source_instructions_remain_exact_untrusted_material(document):
     payload = json.loads(body["messages"][1]["content"])
     assert payload == {
         "mode": "ASK",
+        "output_contract": (
+            "Return one JSON object with a blocks array. Each block must contain "
+            "id, kind, text, and one or more supplied chunk_ids. "
+        ),
         "instruction": "Explain the document",
         "SOURCE_MATERIAL": {"chunks": [{"chunk_id": "trusted-chunk-id", "q": document, "a": ""}]},
     }

@@ -128,6 +128,7 @@ class OpenAICompatibleGenerationClient:
                             "content": json.dumps(
                                 {
                                     "mode": request.mode,
+                                    "output_contract": _output_instructions(output_type),
                                     "instruction": request.instruction,
                                     "SOURCE_MATERIAL": {
                                         "chunks": [
