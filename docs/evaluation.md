@@ -99,10 +99,23 @@ The dated development results appear in [README](../README.md). For opt-in live
 probes, configure your own local services and run:
 
 ```sh
-RUN_LIVE_INTEGRATION=1 .venv/bin/pytest apps/api/tests/live -q --tb=short
+RUN_LIVE_INTEGRATION=1 make test-live
 ```
 
 Live tests use disposable cloud resources and may incur charges; cleanup is attempted
 in finally blocks, but provider failures may prevent deletion. Images stay disabled.
 Synthetic learning probes exercise real generation and retrieval through services;
 desktop E2E uses fixtures. Neither establishes teaching quality across real courses.
+
+The live directory also contains four offline polling tests; those can pass while
+all seven service tests are skipped without opt-in. With images disabled, the image
+probe remains skipped even during a live run. The unified command checks configuration
+and runs existing Office, ASK and learning probes; it does not create duplicate tests.
+It omits tracebacks to avoid printing local values on failures. Investigate a failure
+locally without publishing raw configuration or provider responses.
+
+Latest live smoke gate (2026-09-08): not accepted. Two full runs failed learning
+probes while ASK and Office probes passed. Follow-up failures occurred during the
+external diagnostic generation request; some individual retries succeeded. Root
+cause remains unresolved (network versus timeout was not recorded). The deterministic
+public report is unaffected and must not be read as proof of stable live service.

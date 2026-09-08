@@ -33,3 +33,7 @@ verify-trust:
 verify-learning: verify-trust
 	.venv/bin/python -m grounded_tutor.evaluation.learning --cases evals/cases/learning.jsonl --output evals/reports/learning-local.json
 	npm --prefix apps/web exec playwright test -- --config=apps/web/playwright.config.ts
+
+.PHONY: test-live
+test-live:
+	.venv/bin/python scripts/test_live.py

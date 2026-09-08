@@ -233,7 +233,7 @@ not GitHub publication, and does not measure live model or teaching quality.
 - Create: `apps/api/tests/live/test_generation_live.py`
 - Modify: `Makefile`
 
-- [ ] **Step 1: Write guarded live tests**
+- [x] **Step 1: Write guarded live tests**
 
 ```python
 pytestmark = pytest.mark.skipif(
@@ -255,13 +255,13 @@ async def test_live_fastgpt_create_upload_search_cleanup(live_fastgpt) -> None:
         await live_fastgpt.delete_dataset(dataset.dataset_id)
 ```
 
-- [ ] **Step 2: Verify normal CI skips live calls**
+- [x] **Step 2: Verify normal CI skips live calls**
 
 Run: `.venv/bin/pytest apps/api/tests/live -q`
 
 Expected: tests are skipped and no network request occurs.
 
-- [ ] **Step 3: Add an explicit credential-safe command**
+- [x] **Step 3: Add an explicit credential-safe command**
 
 `make test-live` checks the required FastGPT and model variable names are non-empty without echoing values, then runs only live tests. The FastGPT test deletes only the temporary Dataset ID it created in the same test.
 
@@ -271,12 +271,27 @@ Run: `RUN_LIVE_INTEGRATION=1 make test-live`
 
 Expected: create/upload/search/cleanup succeeds and generation returns valid structured JSON. If credentials are not provided, leave this gate pending and do not claim success.
 
-- [ ] **Step 5: Commit tests without credentials**
+- [x] **Step 5: Commit tests without credentials**
 
 ```bash
 git add apps/api/tests/live Makefile
 git commit -m "test: add opt-in live service smoke tests"
 ```
+
+Implementation notes (2026-09-08): Reused existing Office, ASK and learning live
+probes instead of adding duplicate tests. Added opt-in `make test-live`, private
+configuration validation, suppressed traceback/local-variable output and preserved
+pytest exit codes. Offline run: 4 polling tests passed, 7 live tests skipped.
+Entry tests: 4 passed; release tests: 21 passed; backend: 953 passed, 7 skipped.
+Ruff, public scan and independent entry-point review passed.
+
+Step 4 remains pending: first full live run had 9 passed, 1 failed, 1 skipped;
+a second had 8 passed, 2 failed, 1 skipped. A single learning-flow retry passed,
+but subsequent diagnostics reproduced external generation request failures in
+both learning tests. A separate diagnostic request succeeded in 4.6 seconds.
+The original failures' timeout/network categories were not retained, so the root
+cause is unresolved. Do not claim stable live acceptance or proceed to release
+audit until this is investigated. No generation validation or timeout was loosened.
 
 ### Task 6: Run the release audit and prepare GitHub publication
 

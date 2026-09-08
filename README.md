@@ -93,6 +93,18 @@ need installation on Linux. CI currently runs the trust gate and secret scan;
 the full learning gate is a local check. Live probes are opt-in and incur external
 service calls; see [evaluation](docs/evaluation.md).
 
+To run the existing live probes explicitly with your local credentials:
+
+```sh
+RUN_LIVE_INTEGRATION=1 make test-live
+```
+
+Without opt-in the command stops before loading settings. It checks required
+configuration names without printing values and suppresses pytest tracebacks.
+It creates temporary cloud datasets using synthetic material and attempts cleanup;
+provider failures may require manual cleanup. Images remain conditional on the
+existing disabled-by-default capability. No credentials are copied into test files.
+
 ## Target thresholds
 
 Deterministic citation coverage, refusal, replay and journey ratios must equal 1;
