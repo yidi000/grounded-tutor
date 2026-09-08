@@ -75,7 +75,7 @@ guidance is recorded separately as deferred work and is not implemented.
 - Create: `docs/security-and-data.md`
 - Create: `apps/api/tests/release/test_documentation.py`
 
-- [ ] **Step 1: Write the failing documentation test**
+- [x] **Step 1: Write the failing documentation test**
 
 ```python
 @pytest.mark.parametrize("path", [
@@ -92,28 +92,37 @@ def test_readme_distinguishes_targets_from_results() -> None:
     assert "Measured results" in text
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_documentation.py -q`
 
 Expected: FAIL because the public documents are absent.
 
-- [ ] **Step 3: Write exact setup and boundary documentation**
+- [x] **Step 3: Write exact setup and boundary documentation**
 
 README sections are: problem, primary user, capabilities, non-goals, architecture, fake-adapter quick start, live FastGPT setup, model-provider setup, testing, target thresholds, measured results, limitations, roadmap, security/data, and license. Architecture distinguishes the local product database from FastGPT. Evaluation documents all 48 case IDs and formulas. Security/data prohibits credentials and real student material in issues, logs, screenshots, fixtures, and reports. CONTRIBUTING requires tests and a declaration that contributed sample data is redistributable.
 
-- [ ] **Step 4: Verify links and tests**
+- [x] **Step 4: Verify links and tests**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_documentation.py -q && npx --yes markdown-link-check README.md`
 
 Expected: tests pass and README links resolve.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add LICENSE CONTRIBUTING.md README.md docs apps/api/tests/release
 git commit -m "docs: add open source project documentation"
 ```
+
+Implementation notes (2026-09-08): Added README, MIT license, contribution,
+architecture, evaluation and security/data documentation. All 48 case IDs are
+listed with metric definitions and fake/live limitations. Eight documentation
+checks passed (10 release tests total), including local link resolution using
+the standard library rather than downloading a link-check dependency. Verified
+Alembic upgrade and fake API startup against disposable SQLite; public-file scan
+and Ruff passed. Dependency installation from a fresh network environment and
+public demo deployment remain release audit work.
 
 ### Task 3: Sanitize the BTB Workflow as a non-production baseline
 

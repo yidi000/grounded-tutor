@@ -1,0 +1,106 @@
+# Evaluation
+
+The 48 deterministic cases comprise 40 ASK cases and 8 learning journeys. They use
+fake providers and isolated SQLite databases. They test software behavior, not live
+model accuracy, educational effectiveness or arbitrary network activity.
+
+## Formulas and targets
+
+Ratios are between 0 and 1. An empty denominator yields null, not success. Execution
+errors invalidate the ASK report even if other measurements meet their targets.
+
+| Metric | Formula | Target |
+|---|---|---|
+| Grounded citation coverage | structurally grounded returned blocks / returned blocks in completed cases | 1 |
+| Insufficient-material refusal rate | correct empty refusals / expected refusal cases including errors | 1 |
+| Cross-workspace leakage count | sum of unique offending chunk IDs per completed case, including IDs detected through foreign evidence text | 0 |
+| Unauthorized external call count | sum of provider calls exceeding case budgets plus forbidden provider operations | 0 |
+| Idempotent replay rate | correct replays without extra provider calls / replay cases including errors | 1 |
+| ASK journey pass rate | cases passing every check / all cases including errors | 1 |
+| Learning journey pass rate | successful learning cases / all 8 learning cases | 1 |
+
+See [detailed metric semantics](../evals/README.md) and
+[acceptance targets](../evals/targets.json). Structural coverage does not check
+whether a real model's prose is semantically entailed by its citations.
+
+## Case inventory
+
+| Case | Category or journey |
+|---|---|
+| GA-01 | grounded_answer |
+| GA-02 | grounded_answer |
+| GA-03 | grounded_answer |
+| GA-04 | grounded_answer |
+| GA-05 | grounded_answer |
+| GA-06 | grounded_answer |
+| GA-07 | grounded_answer |
+| GA-08 | grounded_answer |
+| GA-09 | grounded_answer |
+| GA-10 | grounded_answer |
+| IM-01 | insufficient_material |
+| IM-02 | insufficient_material |
+| IM-03 | insufficient_material |
+| IM-04 | insufficient_material |
+| IM-05 | insufficient_material |
+| IM-06 | insufficient_material |
+| IM-07 | insufficient_material |
+| IM-08 | insufficient_material |
+| WI-01 | workspace_isolation |
+| WI-02 | workspace_isolation |
+| WI-03 | workspace_isolation |
+| WI-04 | workspace_isolation |
+| WI-05 | workspace_isolation |
+| WI-06 | workspace_isolation |
+| CV-01 | citation_validation |
+| CV-02 | citation_validation |
+| CV-03 | citation_validation |
+| CV-04 | citation_validation |
+| CV-05 | citation_validation |
+| CV-06 | citation_validation |
+| SS-01 | source_state |
+| SS-02 | source_state |
+| SS-03 | source_state |
+| SS-04 | source_state |
+| ID-01 | idempotency |
+| ID-02 | idempotency |
+| ID-03 | idempotency |
+| RC-01 | recovery |
+| RC-02 | recovery |
+| RC-03 | recovery |
+
+| Case | Category or journey |
+|---|---|
+| LR-01 | invite_consent |
+| LR-02 | dismiss_cooldown |
+| LR-03 | diagnostic_skip |
+| LR-04 | bounded_plan |
+| LR-05 | check_detour |
+| LR-06 | failed_check |
+| LR-07 | passed_check |
+| LR-08 | reload |
+
+## Running and reporting
+
+From the repository root run `make verify-learning`. Individual deterministic runners:
+
+```sh
+.venv/bin/python -m grounded_tutor.evaluation.runner --cases evals/cases/p0.jsonl --output evals/reports/local.json
+.venv/bin/python -m grounded_tutor.evaluation.learning --cases evals/cases/learning.jsonl --output evals/reports/learning-local.json
+```
+
+Reports remain local and ignored; do not commit raw outputs. The ASK report includes
+commit/source hashes, observations and separate target checks. See
+[trace handling](local-evaluation-traces.md). A reproducible public release report
+will be prepared separately; targets must never be presented as measured values.
+
+The dated development results appear in [README](../README.md). For opt-in live
+probes, configure your own local services and run:
+
+```sh
+RUN_LIVE_INTEGRATION=1 .venv/bin/pytest apps/api/tests/live -q --tb=short
+```
+
+Live tests use disposable cloud resources and may incur charges; cleanup is attempted
+in finally blocks, but provider failures may prevent deletion. Images stay disabled.
+Synthetic learning probes exercise real generation and retrieval through services;
+desktop E2E uses fixtures. Neither establishes teaching quality across real courses.
