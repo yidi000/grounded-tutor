@@ -23,7 +23,7 @@
 - Create: `samples/rag-fundamentals/manifest.json`
 - Create: `apps/api/tests/release/test_sample_manifest.py`
 
-- [ ] **Step 1: Write the failing sample authorization test**
+- [x] **Step 1: Write the failing sample authorization test**
 
 ```python
 def test_sample_manifest_is_public_and_complete() -> None:
@@ -34,28 +34,35 @@ def test_sample_manifest_is_public_and_complete() -> None:
     assert all((Path("samples/rag-fundamentals") / name).exists() for name in manifest["files"])
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_sample_manifest.py -q`
 
 Expected: FAIL because the manifest is absent.
 
-- [ ] **Step 3: Add templates and original material**
+- [x] **Step 3: Add templates and original material**
 
 The API example contains names only: `EXTERNAL_MODE`, `DATABASE_URL`, `FASTGPT_BASE_URL`, `FASTGPT_API_KEY`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `RUN_LIVE_INTEGRATION`, and `ENABLE_LOCAL_ADMIN`; credential values are blank. Write two original documents covering RAG components, chunking, semantic/full-text/hybrid retrieval, Rerank, grounding, and evaluation. The manifest records CC0-1.0, purpose, file list, and SHA-256 hashes.
 
-- [ ] **Step 4: Verify manifest hashes and ignore rules**
+- [x] **Step 4: Verify manifest hashes and ignore rules**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_sample_manifest.py -q && git check-ignore apps/api/.env`
 
 Expected: sample test passes and the real `.env` path is ignored.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add .env.example apps/api/.env.example samples apps/api/tests/release
 git commit -m "docs: add safe demo corpus and env templates"
 ```
+
+Implementation notes (2026-09-08): Added identical fake-mode configuration templates,
+original CC0 sample documents and SHA-256 manifest. The publication guard permits
+only the two exact template paths while retaining credential scanning. Targeted
+release/security tests: 19 passed; backend: 932 passed, 7 skipped; Ruff and public
+file scan passed. Real local configuration remains ignored. Basic Q&A/upload
+guidance is recorded separately as deferred work and is not implemented.
 
 ### Task 2: Add public documentation and licensing
 

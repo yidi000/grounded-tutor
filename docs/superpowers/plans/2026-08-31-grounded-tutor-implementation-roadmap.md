@@ -52,6 +52,28 @@ grounded-tutor/
 
 Implement Phases 1–4 in order. After every task in the referenced plans, run its checks, report the diff and results, and stop until the user says `继续`; the revised tasks make these gates explicit. Do not start Phase 5, P1 webpage import, or P2 whole-site sync before all four P0 phases pass.
 
+## Deferred basic Q&A and upload guidance (2026-09-08)
+
+User-approved backlog only; do not implement now. Scheduling is undecided and
+this does not expand the current P0 release gate or authorize free-chat work.
+
+- Offer brief general explanations for basic questions without usable evidence,
+  clearly labeled as general knowledge not verified against the user's sources.
+  Show a deterministic upload-material prompt and upload entry point.
+- Keep source-supported answers on the existing citation-validated path. Never
+  invent citations or guess the contents of missing documents.
+- Distinguish missing evidence from retrieval/model failures; failures retain
+  explicit error and retry behavior rather than falling back silently.
+- Persist the answer type so history restoration preserves its provenance label.
+  General answers must not become evidence for diagnostics, scoring or mastery.
+- Initial scope is single-turn basic Q&A. Context-aware multi-turn free chat needs
+  a separate scope decision. Model accuracy and basic-question classification
+  cannot be guaranteed; define evaluation cases before implementation.
+
+Acceptance coverage when scheduled: no-source basic question, source-supported
+question, out-of-source question, missing-document question, provider failure,
+history reload, and separation from learning assessment.
+
 ## Locked technical decisions
 
 - Use one FastGPT Dataset per Topic Workspace and one Collection per Source.

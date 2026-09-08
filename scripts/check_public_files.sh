@@ -46,6 +46,8 @@ def main():
         path = Path(os.fsdecode(raw_path))
         # No public reports are approved yet: add exact names only after review.
         forbidden = any(part == ".env" or part.startswith(".env.") for part in path.parts)
+        if path.as_posix() in {".env.example", "apps/api/.env.example"}:
+            forbidden = False  # Exact public templates still undergo credential scanning.
         forbidden |= "evals/reports" in path.as_posix() and path.as_posix() != "evals/reports/.gitkeep"
         if mode not in {b"100644", b"100755"} or stage != b"0":
             violations += 1

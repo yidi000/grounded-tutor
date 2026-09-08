@@ -1,0 +1,12 @@
+{
+  "license": "CC0-1.0",
+  "created_for": "Grounded Tutor demonstration",
+  "files": [
+    "01-rag-overview.md",
+    "02-retrieval-quality.md"
+  ],
+  "sha256": {
+    "01-rag-overview.md": "ce1e5df8674ff10606cf4669a9d4a6c7486f0525d19d49ee47dc3690bf980dae",
+    "02-retrieval-quality.md": "29c7b41d252b405c3ff755aab79f9f867a5633ae66ded71faaa21a1be89f1200"
+  }
+}

@@ -151,3 +151,16 @@ def test_environment_and_dotenv_values_are_both_checked(repo):
     )
     assert result.returncode == 1
     assert active_id not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("path", [".env.example", "apps/api/.env.example"])
+def test_exact_example_paths_allowed_but_still_scanned(repo, path):
+    target = tracked(repo, path, "EXTERNAL_MODE=fake\nFASTGPT_API_KEY=\n")
+    assert scan(repo).returncode == 0
+    target.write_text("FASTGPT_API_KEY=" + "fastgpt" + "-" + "a1B2c3D4" * 4)
+    assert scan(repo).returncode == 1
+
+
+def test_other_example_paths_remain_blocked(repo):
+    tracked(repo, "nested/.env.example", "EXTERNAL_MODE=fake")
+    assert scan(repo).returncode == 1
