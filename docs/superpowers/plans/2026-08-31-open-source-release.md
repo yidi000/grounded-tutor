@@ -265,7 +265,7 @@ Expected: tests are skipped and no network request occurs.
 
 `make test-live` checks the required FastGPT and model variable names are non-empty without echoing values, then runs only live tests. The FastGPT test deletes only the temporary Dataset ID it created in the same test.
 
-- [ ] **Step 4: Run with owner-provided local credentials**
+- [x] **Step 4: Run with owner-provided local credentials**
 
 Run: `RUN_LIVE_INTEGRATION=1 make test-live`
 
@@ -285,13 +285,23 @@ pytest exit codes. Offline run: 4 polling tests passed, 7 live tests skipped.
 Entry tests: 4 passed; release tests: 21 passed; backend: 953 passed, 7 skipped.
 Ruff, public scan and independent entry-point review passed.
 
-Step 4 remains pending: first full live run had 9 passed, 1 failed, 1 skipped;
+Initial Step 4 attempt (subsequently resolved below): first full live run had 9 passed, 1 failed, 1 skipped;
 a second had 8 passed, 2 failed, 1 skipped. A single learning-flow retry passed,
 but subsequent diagnostics reproduced external generation request failures in
 both learning tests. A separate diagnostic request succeeded in 4.6 seconds.
 The original failures' timeout/network categories were not retained, so the root
 cause is unresolved. Do not claim stable live acceptance or proceed to release
 audit until this is investigated. No generation validation or timeout was loosened.
+
+Follow-up resolution (2026-09-08): Captured a real generation timeout with the
+original 5-second read bound. TDD added a slow-response budget regression and
+redacted/no-retry expiry coverage, then changed only the owned generation client's
+read timeout to 30 seconds. Live learning probes now use that production client;
+the contract fixture includes an explicit numerical example for its example-block
+requirement. Full live entry: 10 passed, 1 image skip. Backend: 955 passed, 7 skipped;
+frontend: 58 passed; evaluations: 48 passed. Step 4 is now accepted for this run.
+Earlier requests failing with assertion errors were not conclusively attributed
+to timeout; the example fixture correction avoids requiring unsupported examples.
 
 ### Task 6: Run the release audit and prepare GitHub publication
 

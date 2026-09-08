@@ -114,8 +114,10 @@ and runs existing Office, ASK and learning probes; it does not create duplicate 
 It omits tracebacks to avoid printing local values on failures. Investigate a failure
 locally without publishing raw configuration or provider responses.
 
-Latest live smoke gate (2026-09-08): not accepted. Two full runs failed learning
-probes while ASK and Office probes passed. Follow-up failures occurred during the
-external diagnostic generation request; some individual retries succeeded. Root
-cause remains unresolved (network versus timeout was not recorded). The deterministic
-public report is unaffected and must not be read as proof of stable live service.
+Latest live smoke gate (2026-09-08): accepted after a generation timeout fix.
+Earlier runs failed during diagnostic generation; a safe diagnostic hook then
+captured the timeout category. The owned generator now uses a 30-second read
+bound while keeping other HTTP timeouts at 5 seconds. The complete live entry
+passed 10 tests with 1 image skip, including both learning probes. The earlier
+failures remain recorded in the release plan; passing this run does not guarantee
+future provider availability or model teaching quality.

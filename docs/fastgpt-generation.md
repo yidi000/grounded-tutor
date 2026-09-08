@@ -41,6 +41,20 @@ request and keeps conversation state locally. Reject malformed output, including
 multiple concatenated JSON objects; do not extract an arbitrary object to make
 an incompatible workflow appear to work.
 
+## Request timing
+
+The application-owned generation client allows 30 seconds of read inactivity for
+model responses; connect, write and connection-pool waits remain 5 seconds. This
+is not an end-to-end request deadline. Exceeding the bound still raises a redacted
+external timeout error, with no automatic transport retry. Injected HTTP clients
+retain their caller-defined timeout policy. Live learning tests use the same
+owned client as the application.
+
+On 2026-09-08 a diagnostic generation timeout was reproduced under the former
+5-second read default; successful probes also took 4.4–4.9 seconds. After extending
+only the read bound, the full live suite passed 10 tests with the image probe skipped.
+This addresses the observed timeout, not every possible provider/network failure.
+
 ## Verification
 
 On 2026-09-08 the dedicated application was published with the unified prompt.

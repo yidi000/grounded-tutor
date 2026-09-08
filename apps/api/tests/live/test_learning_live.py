@@ -2,7 +2,6 @@
 
 import os
 
-import httpx
 import pytest
 
 from grounded_tutor.adapters.fastgpt import RetrievedChunk
@@ -25,17 +24,16 @@ async def test_live_learning_generation_contracts():
             "probe",
             "Statistics",
             "Measures of center",
-            "Mean is sum divided by count. Median is the middle value. Mode is the most frequent value.",
+            "Mean is sum divided by count. For 2, 4, 6 the mean is 4. "
+            "Median is the middle value. Mode is the most frequent value.",
             1,
         ),
     )
-    async with httpx.AsyncClient() as client:
-        generation = OpenAICompatibleGenerationClient(
-            settings.llm_base_url,
-            settings.llm_api_key.get_secret_value(),
-            settings.llm_model,
-            client=client,
-        )
+    async with OpenAICompatibleGenerationClient(
+        settings.llm_base_url,
+        settings.llm_api_key.get_secret_value(),
+        settings.llm_model,
+    ) as generation:
         result = await generation.generate_diagnostic(
             "Learn mean, median and mode", "Beginner", chunks
         )
@@ -96,17 +94,15 @@ async def test_live_learning_from_import_to_completed_plan(tmp_path):
     Base.metadata.create_all(engine)
     dataset = None
     async with (
-        httpx.AsyncClient() as http,
         FastGPTClient(
             settings.fastgpt_base_url, settings.fastgpt_api_key.get_secret_value()
         ) as fastgpt,
-    ):
-        generation = OpenAICompatibleGenerationClient(
+        OpenAICompatibleGenerationClient(
             settings.llm_base_url,
             settings.llm_api_key.get_secret_value(),
             settings.llm_model,
-            client=http,
-        )
+        ) as generation,
+    ):
         try:
             dataset = await fastgpt.create_dataset(f"Grounded Tutor learning probe {uuid4()}")
             with Session(engine, expire_on_commit=False) as session:

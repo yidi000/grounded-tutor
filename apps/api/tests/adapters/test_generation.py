@@ -242,3 +242,33 @@ async def test_user_envelope_carries_output_contract_for_workflow_gateways(opera
                 await client.generate_check("objective", "single_choice", _request().chunks)
     assert expected in seen[0]["output_contract"]
     assert "output_contract" not in seen[0]["SOURCE_MATERIAL"]
+
+
+@pytest.mark.asyncio
+async def test_owned_client_allows_slow_generation_but_bounds_other_io(respx_mock):
+    def respond(request):
+        timeout = request.extensions["timeout"]
+        # Model response headers may arrive after the former five-second default.
+        if timeout["read"] < 6:
+            raise httpx.ReadTimeout("synthetic delayed model", request=request)
+        assert timeout == {"connect": 5, "read": 30, "write": 5, "pool": 5}
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"blocks":[]}'}}]})
+
+    route = respx_mock.post("https://llm.test/v1/chat/completions").mock(side_effect=respond)
+    async with OpenAICompatibleGenerationClient("https://llm.test/v1", "secret", "model") as client:
+        answer = await client.generate_content(_request())
+    assert not answer.blocks and route.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_generation_read_is_redacted_without_automatic_retry(respx_mock):
+    route = respx_mock.post("https://llm.test/v1/chat/completions").mock(
+        side_effect=httpx.ReadTimeout("private timeout detail")
+    )
+    async with OpenAICompatibleGenerationClient("https://llm.test/v1", "secret", "model") as client:
+        with pytest.raises(ExternalServiceError) as captured:
+            await client.generate_content(_request())
+    assert captured.value.category == "timeout"
+    assert "private timeout detail" not in str(captured.value)
+    assert captured.value.__context__ is None
+    assert route.call_count == 1

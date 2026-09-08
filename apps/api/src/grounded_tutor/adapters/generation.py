@@ -63,7 +63,7 @@ class OpenAICompatibleGenerationClient:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model = model
-        self._client = client or httpx.AsyncClient()
+        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(5, read=30))
         self._owns_client = client is None
 
     def __repr__(self) -> str:
