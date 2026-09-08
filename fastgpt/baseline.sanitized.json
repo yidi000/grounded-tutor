@@ -1,0 +1,2575 @@
+{
+  "chatConfig": {
+    "autoExecute": {
+      "defaultPrompt": "",
+      "open": false
+    },
+    "chatInputGuide": {
+      "customUrl": "",
+      "open": true
+    },
+    "questionGuide": {
+      "open": true
+    },
+    "scheduledTriggerConfig": {
+      "cronString": "",
+      "defaultPrompt": "",
+      "timezone": "Asia/Shanghai"
+    },
+    "ttsConfig": {
+      "type": "web"
+    },
+    "variables": [],
+    "welcomeConfig": {
+      "welcomeText": "Hello! Welcome to Beat The Bot! \nI am the Class Teaching Assistant and you can ask technical issue or AI knowledge when you are playing the game."
+    },
+    "welcomeText": "Hello! Welcome to Beat The Bot! \nI am the Class Teaching Assistant and you can ask technical issue or AI knowledge when you are playing the game.",
+    "whisperConfig": {
+      "autoSend": false,
+      "autoTTSResponse": false,
+      "open": true
+    }
+  },
+  "edges": [
+    {
+      "source": "by6Ovsh0EdAf5Qkn",
+      "sourceHandle": "by6Ovsh0EdAf5Qkn-source-wqre",
+      "target": "iJJLsyFEKrI5zovh",
+      "targetHandle": "iJJLsyFEKrI5zovh-target-left"
+    },
+    {
+      "source": "by6Ovsh0EdAf5Qkn",
+      "sourceHandle": "by6Ovsh0EdAf5Qkn-source-sdfa",
+      "target": "stwuvvUdaTkV5dz3",
+      "targetHandle": "stwuvvUdaTkV5dz3-target-left"
+    },
+    {
+      "source": "by6Ovsh0EdAf5Qkn",
+      "sourceHandle": "by6Ovsh0EdAf5Qkn-source-agex",
+      "target": "ng0rIPn43rw9T6jX",
+      "targetHandle": "ng0rIPn43rw9T6jX-target-left"
+    },
+    {
+      "source": "448745",
+      "sourceHandle": "448745-source-right",
+      "target": "mRbX5Nfd1LW1qV2a",
+      "targetHandle": "mRbX5Nfd1LW1qV2a-target-left"
+    },
+    {
+      "source": "mRbX5Nfd1LW1qV2a",
+      "sourceHandle": "mRbX5Nfd1LW1qV2a-source-right",
+      "target": "by6Ovsh0EdAf5Qkn",
+      "targetHandle": "by6Ovsh0EdAf5Qkn-target-left"
+    },
+    {
+      "source": "iJJLsyFEKrI5zovh",
+      "sourceHandle": "iJJLsyFEKrI5zovh-source-right",
+      "target": "b9ZR3kpyj2mTXHGM",
+      "targetHandle": "b9ZR3kpyj2mTXHGM-target-left"
+    },
+    {
+      "source": "stwuvvUdaTkV5dz3",
+      "sourceHandle": "stwuvvUdaTkV5dz3-source-right",
+      "target": "rsQOAceX0ghtN18f",
+      "targetHandle": "rsQOAceX0ghtN18f-target-left"
+    },
+    {
+      "source": "ng0rIPn43rw9T6jX",
+      "sourceHandle": "ng0rIPn43rw9T6jX-source-right",
+      "target": "wzomBsPwLDKHlHGx",
+      "targetHandle": "wzomBsPwLDKHlHGx-target-left"
+    },
+    {
+      "source": "wzomBsPwLDKHlHGx",
+      "sourceHandle": "wzomBsPwLDKHlHGx-source-ELSE",
+      "target": "aGhXOzYHw2zGjgJm",
+      "targetHandle": "aGhXOzYHw2zGjgJm-target-left"
+    },
+    {
+      "source": "wzomBsPwLDKHlHGx",
+      "sourceHandle": "wzomBsPwLDKHlHGx-source-IF",
+      "target": "aAnVPcn4EnZ9Z5fI",
+      "targetHandle": "aAnVPcn4EnZ9Z5fI-target-left"
+    },
+    {
+      "source": "aAnVPcn4EnZ9Z5fI",
+      "sourceHandle": "aAnVPcn4EnZ9Z5fI-source-right",
+      "target": "kGvdU7CGgPs4aE6K",
+      "targetHandle": "kGvdU7CGgPs4aE6K-target-left"
+    },
+    {
+      "source": "by6Ovsh0EdAf5Qkn",
+      "sourceHandle": "by6Ovsh0EdAf5Qkn-source-fME371O0LlLnvJWK",
+      "target": "meqMF9YTB55JXHGb",
+      "targetHandle": "meqMF9YTB55JXHGb-target-left"
+    }
+  ],
+  "intro": "This Workflow is for MSBA7033 Beat The Bot Game.",
+  "name": "BTB Teaching Assistant 1.0",
+  "nodes": [
+    {
+      "avatar": "core/workflow/template/workflowStart",
+      "flowNodeType": "workflowStart",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "User Question",
+          "valueType": "string"
+        }
+      ],
+      "intro": "Questions from the Players or Instructors in BTB class.",
+      "name": "User Input",
+      "nodeId": "448745",
+      "outputs": [
+        {
+          "description": "",
+          "id": "userChatInput",
+          "key": "userChatInput",
+          "label": "common:core.module.input.label.user question",
+          "type": "static",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 570,
+        "y": -270
+      },
+      "version": "481"
+    },
+    {
+      "avatar": "core/workflow/template/aiChat",
+      "catchError": false,
+      "flowNodeType": "chatNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "selectedType": "settingLLMModel",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "temperature",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "maxToken",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "isResponseAnswerText",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "system",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quoteTemplate",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quotePrompt",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVision",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatAudio",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVideo",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoning",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatTopP",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatStopSign",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "isRichText": true,
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "maxLength": 100000,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "You are a professional query optimizer for knowledge-based AI workflows. Your only task is to clarify, refine, and improve user queries so they become explicit, specific, and accountable for knowledge-base retrieval and answer systems.\nRules\n- Understand the user’s real intent, not just the literal wording.\n- Infer missing context when implied (such as domain, scope, constraints, or background).\n- Remove ambiguity, vagueness, and typos.\n- Rewrite the question into clear, precise, and natural English.\n- Do not answer the question; only optimize it.\n- Preserve the original meaning; do not invent facts or alter intent.\n- Output only the optimized question — no extra explanation.\nOutput Format\nReturn only the final optimized question.",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "agentGenerated",
+            "numberInput",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "numberInput",
+          "toolDescription": "",
+          "value": 6,
+          "valueType": "chatHistory"
+        },
+        {
+          "debugLabel": "Dataset citation",
+          "description": "",
+          "key": "quoteQA",
+          "label": "",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "selectedType": "settingDatasetQuotePrompt",
+          "toolDescription": "",
+          "valueType": "datasetQuote"
+        },
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "User Question",
+          "value": [
+            "448745",
+            "userChatInput"
+          ],
+          "valueType": "string"
+        }
+      ],
+      "intro": "AI 大模型对话",
+      "name": "Questions Modified",
+      "nodeId": "mRbX5Nfd1LW1qV2a",
+      "outputs": [
+        {
+          "description": "Combine the current response with Chat history and return it as the new context",
+          "id": "history",
+          "key": "history",
+          "label": "common:core.module.output.label.New context",
+          "required": true,
+          "type": "static",
+          "valueType": "chatHistory"
+        },
+        {
+          "description": "Triggered after the streaming response finishes",
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "required": true,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "reasoningText",
+          "invalid": true,
+          "key": "reasoningText",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 1140,
+        "y": -298
+      },
+      "showStatus": true,
+      "version": "4.9.7"
+    },
+    {
+      "avatar": "core/workflow/template/questionClassify",
+      "flowNodeType": "classifyQuestion",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "renderTypeList": [
+            "selectLLMModel",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "selectLLMModel",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Background",
+          "isRichText": true,
+          "key": "systemPrompt",
+          "label": "common:core.module.input.label.Background",
+          "maxLength": 100000,
+          "placeholder": "common:core.module.input.placeholder.Classify background",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "This workflow is designed for the MSBA7033 Beat The Bot (BTB) game.\nYou may only answer questions related to BTB, game operation and usage questions\n, and AI knowledge.",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "agentGenerated",
+            "numberInput",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "numberInput",
+          "toolDescription": "",
+          "value": 6,
+          "valueType": "chatHistory"
+        },
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "user question",
+          "value": [
+            "mRbX5Nfd1LW1qV2a",
+            "answerText"
+          ],
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "agents",
+          "label": "",
+          "renderTypeList": [
+            "custom"
+          ],
+          "selectedType": "custom",
+          "toolDescription": "",
+          "value": [
+            {
+              "key": "wqre",
+              "value": "Introduction of the Beat The Bot Game\n-  Professor Intro\n-  MSBA7033 Intro\n-  Beat The Bot Game Related Questions"
+            },
+            {
+              "key": "sdfa",
+              "value": "Technical Issue When Players Play the Game.\nQuestion about the Systems."
+            },
+            {
+              "key": "agex",
+              "value": "Knowledge Related Questions\ne.g. What is Temperature? What is Token? What is Creativity of the AI?"
+            },
+            {
+              "key": "fME371O0LlLnvJWK",
+              "value": "Unrelated Questions.\nTA will not answer!"
+            }
+          ],
+          "valueType": "any"
+        }
+      ],
+      "intro": "Here we classified questions related to BTB into 3 main categories.",
+      "name": "Question Classification",
+      "nodeId": "by6Ovsh0EdAf5Qkn",
+      "outputs": [
+        {
+          "description": "",
+          "id": "cqResult",
+          "key": "cqResult",
+          "label": "workflow:classification_result",
+          "required": true,
+          "type": "static",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 1920,
+        "y": -240
+      },
+      "showStatus": true,
+      "version": "4.9.2"
+    },
+    {
+      "avatar": "core/workflow/template/datasetSearch",
+      "catchError": false,
+      "flowNodeType": "datasetSearchNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "similarity",
+          "label": "",
+          "renderTypeList": [
+            "selectDatasetParamsModal"
+          ],
+          "selectedType": "selectDatasetParamsModal",
+          "toolDescription": "",
+          "value": 0.4,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "limit",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 5000,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "searchMode",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "embedding",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "embeddingWeight",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0.5,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "usingReRank",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "rerankModel",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "rerankWeight",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0.5,
+          "valueType": "number"
+        }
+      ],
+      "intro": "调用“语义检索”和“全文检索”能力，从“知识库”中查找可能与问题相关的参考内容",
+      "name": "Introduction of the Beat The Bot Game",
+      "nodeId": "iJJLsyFEKrI5zovh",
+      "outputs": [
+        {
+          "description": "Special array format, returns an empty array when the search result is empty.",
+          "id": "quoteQA",
+          "key": "quoteQA",
+          "label": "common:core.module.Dataset quote.label",
+          "type": "static",
+          "valueType": "datasetQuote"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 3030,
+        "y": -675
+      },
+      "showStatus": true,
+      "version": "4.9.2"
+    },
+    {
+      "avatar": "core/workflow/template/datasetSearch",
+      "catchError": false,
+      "flowNodeType": "datasetSearchNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "similarity",
+          "label": "",
+          "renderTypeList": [
+            "selectDatasetParamsModal"
+          ],
+          "selectedType": "selectDatasetParamsModal",
+          "toolDescription": "",
+          "value": 0.4,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "limit",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 5000,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "searchMode",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "embedding",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "embeddingWeight",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0.5,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "usingReRank",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "rerankModel",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "rerankWeight",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0.5,
+          "valueType": "number"
+        }
+      ],
+      "intro": "Use the capabilities of 'semantic search' and 'full-text search' to find reference content from the 'knowledge base' that may be related to the question",
+      "name": "Game Operation and Usage Issues Knowledge Base Search",
+      "nodeId": "stwuvvUdaTkV5dz3",
+      "outputs": [
+        {
+          "description": "Special array format, returns an empty array when the search result is empty.",
+          "id": "quoteQA",
+          "key": "quoteQA",
+          "label": "common:core.module.Dataset quote.label",
+          "type": "static",
+          "valueType": "datasetQuote"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 3090,
+        "y": 150
+      },
+      "showStatus": true,
+      "version": "4.9.2"
+    },
+    {
+      "avatar": "core/workflow/template/datasetSearch",
+      "catchError": true,
+      "flowNodeType": "datasetSearchNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "similarity",
+          "label": "",
+          "renderTypeList": [
+            "selectDatasetParamsModal"
+          ],
+          "selectedType": "selectDatasetParamsModal",
+          "toolDescription": "",
+          "value": 0.65,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "limit",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 5000,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "searchMode",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "embedding",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "embeddingWeight",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0.5,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "usingReRank",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "rerankModel",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "rerankWeight",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0.5,
+          "valueType": "number"
+        }
+      ],
+      "intro": "调用“语义检索”和“全文检索”能力，从“知识库”中查找可能与问题相关的参考内容",
+      "name": "AI Knowledge Base",
+      "nodeId": "ng0rIPn43rw9T6jX",
+      "outputs": [
+        {
+          "description": "Special array format, returns an empty array when the search result is empty.",
+          "id": "quoteQA",
+          "key": "quoteQA",
+          "label": "common:core.module.Dataset quote.label",
+          "type": "static",
+          "valueType": "datasetQuote"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 3090,
+        "y": 1020
+      },
+      "showStatus": true,
+      "version": "4.9.2"
+    },
+    {
+      "avatar": "core/workflow/template/aiChat",
+      "catchError": false,
+      "flowNodeType": "chatNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "selectedType": "settingLLMModel",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "temperature",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "maxToken",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "isResponseAnswerText",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "system",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quoteTemplate",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quotePrompt",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVision",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatAudio",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVideo",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoning",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatTopP",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatStopSign",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "isRichText": true,
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "maxLength": 100000,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "You are an AI terminology and learning support assistant for a Beat the Bot (BTB) student activity.\n\nYour job is to explain AI-related terms, concepts, and system behaviors that students may encounter during the BTB experience, such as prompt, temperature, token, hallucination, context window, knowledge base, semantic search, and other related concepts.\n\nFollow these rules when answering:\n1. Prioritize the provided knowledge base content when answering. Do not invent information that is not supported by the retrieved content.\n2. Explain concepts in simple, student-friendly English that beginners can understand.\n3. Keep the answer clear, structured, and concise unless the user asks for more detail.\n4. When possible, use this structure:\n  - Definition\n  - Why it matters in Beat the Bot\n  - Simple example\n5. If the retrieved knowledge is insufficient, clearly say: \"There is not enough information in the current knowledge base to answer this question confidently.\" Do not guess or fabricate.\n6. If the user’s question is vague, provide the closest relevant explanation and encourage the user to ask a more specific question.\n7. Focus on helping students understand how AI works in the BTB activity, not just giving abstract textbook definitions.\n8. If relevant, explain how the concept affects whether a student can “beat the bot,” such as through better prompting, clearer instructions, or improved context.\n\nKnowledge Base Content:{{$ng0rIPn43rw9T6jX.quoteQA$}}\nStudent Question:{{$mRbX5Nfd1LW1qV2a.answerText$}}",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "agentGenerated",
+            "numberInput",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "numberInput",
+          "toolDescription": "",
+          "value": 10,
+          "valueType": "chatHistory"
+        },
+        {
+          "debugLabel": "Dataset citation",
+          "description": "",
+          "key": "quoteQA",
+          "label": "",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "selectedType": "settingDatasetQuotePrompt",
+          "toolDescription": "",
+          "value": [
+            "ng0rIPn43rw9T6jX",
+            "quoteQA"
+          ],
+          "valueType": "datasetQuote"
+        },
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "User Question",
+          "value": [
+            "mRbX5Nfd1LW1qV2a",
+            "answerText"
+          ],
+          "valueType": "string"
+        }
+      ],
+      "intro": "AI 大模型对话",
+      "name": "AI Summarized Output",
+      "nodeId": "aGhXOzYHw2zGjgJm",
+      "outputs": [
+        {
+          "description": "Combine the current response with Chat history and return it as the new context",
+          "id": "history",
+          "key": "history",
+          "label": "common:core.module.output.label.New context",
+          "required": true,
+          "type": "static",
+          "valueType": "chatHistory"
+        },
+        {
+          "description": "Triggered after the streaming response finishes",
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "required": true,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "reasoningText",
+          "invalid": true,
+          "key": "reasoningText",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 5085,
+        "y": 1140
+      },
+      "showStatus": true,
+      "version": "4.9.7"
+    },
+    {
+      "avatar": "core/workflow/template/aiChat",
+      "catchError": true,
+      "flowNodeType": "chatNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "selectedType": "settingLLMModel",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "temperature",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "maxToken",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "isResponseAnswerText",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "system",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quoteTemplate",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quotePrompt",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVision",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatAudio",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVideo",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoning",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatTopP",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatStopSign",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "isRichText": true,
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "maxLength": 100000,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "You are a learning support assistant for the \"Beat the Bot\" (BTB) student activity.\nYour task is to introduce the BTB game to users, covering:\n1. The professor who designed the game.\n2. The course associated with the game.\n3. Game-related topics, etc.\n\nYou must only answer questions related to BTB, course-related issues, professor-related issues, and game-related issues.\nCombine{{$mRbX5Nfd1LW1qV2a.answerText$}}and{{$iJJLsyFEKrI5zovh.quoteQA$}}to generate the final answer for the user.\n\nWhen answering, adhere to these rules:\n- Base your answers primarily on the provided knowledge base. Do not invent information not supported by retrieved content.\n- Use simple, accessible English to explain concepts, ensuring beginners can understand.\n- Keep your answers concise and to the point. Limit responses to no more than 150 words unless the user specifically asks for more detail. Aim for brevity while maintaining accuracy and completeness.\n- If the knowledge base lacks sufficient information, explicitly state: \"There is not enough information in the current knowledge base to answer this question confidently.\" Do not guess or speculate.\n- If the user's question is vague, provide the most relevant explanation you can and encourage them to ask a more specific question.\n\n",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "agentGenerated",
+            "numberInput",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "numberInput",
+          "toolDescription": "",
+          "value": 6,
+          "valueType": "chatHistory"
+        },
+        {
+          "debugLabel": "Dataset citation",
+          "description": "",
+          "key": "quoteQA",
+          "label": "",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "selectedType": "settingDatasetQuotePrompt",
+          "toolDescription": "",
+          "value": [
+            "iJJLsyFEKrI5zovh",
+            "quoteQA"
+          ],
+          "valueType": "datasetQuote"
+        },
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "User Question",
+          "value": [
+            "mRbX5Nfd1LW1qV2a",
+            "answerText"
+          ],
+          "valueType": "string"
+        }
+      ],
+      "intro": "AI 大模型对话",
+      "name": "Introduction related Output",
+      "nodeId": "b9ZR3kpyj2mTXHGM",
+      "outputs": [
+        {
+          "description": "Combine the current response with Chat history and return it as the new context",
+          "id": "history",
+          "key": "history",
+          "label": "common:core.module.output.label.New context",
+          "required": true,
+          "type": "static",
+          "valueType": "chatHistory"
+        },
+        {
+          "description": "Triggered after the streaming response finishes",
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "required": true,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "reasoningText",
+          "invalid": true,
+          "key": "reasoningText",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 4290,
+        "y": -1140
+      },
+      "showStatus": true,
+      "version": "4.9.7"
+    },
+    {
+      "avatar": "core/workflow/template/aiChat",
+      "catchError": false,
+      "flowNodeType": "chatNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "selectedType": "settingLLMModel",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "temperature",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "maxToken",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "isResponseAnswerText",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "system",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quoteTemplate",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quotePrompt",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVision",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatAudio",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVideo",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoning",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatTopP",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": 0,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatStopSign",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "text",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "isRichText": true,
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "maxLength": 100000,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "Use both{{$mRbX5Nfd1LW1qV2a.answerText$}}to identify the user's intent,and use the{{$stwuvvUdaTkV5dz3.quoteQA$}}as the primary source to generate the final answer.\nThis workflow is designed to address game operation and usage questions for the MSBA7033 Beat The Bot (BTB) game.\nAnswers must strictly follow the {{$stwuvvUdaTkV5dz3.quoteQA$}}. Do not invent, infer, or add any platform features that are not explicitly stated in the knowledge base.\nIf the user asks about a feature that is currently not available on the platform (for example, writing their own prompt), you must clearly state that this feature is not currently supported, and you may add: \"This is a valuable suggestion and could be considered for future improvement.\"\nIf the user provides negative feedback about the platform, first acknowledge that there is room for improvement. Do not defend the platform or make up explanations.\nIf the user's understanding conflicts with the knowledge base, always follow the {{$stwuvvUdaTkV5dz3.quoteQA$}}.\nRespond as a teacher answering a student's question, with a professional, clear, and supportive tone.\nKeep the answer concise, within five sentences, and output only the final answer.",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "agentGenerated",
+            "numberInput",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "numberInput",
+          "toolDescription": "",
+          "value": 10,
+          "valueType": "chatHistory"
+        },
+        {
+          "debugLabel": "Dataset citation",
+          "description": "",
+          "key": "quoteQA",
+          "label": "",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "selectedType": "settingDatasetQuotePrompt",
+          "toolDescription": "",
+          "value": [
+            "stwuvvUdaTkV5dz3",
+            "quoteQA"
+          ],
+          "valueType": "datasetQuote"
+        },
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "User Question",
+          "value": [
+            "mRbX5Nfd1LW1qV2a",
+            "answerText"
+          ],
+          "valueType": "string"
+        }
+      ],
+      "intro": "AI chat",
+      "name": "Game Operation and Usage Issues Related Output",
+      "nodeId": "rsQOAceX0ghtN18f",
+      "outputs": [
+        {
+          "description": "Combine the current response with Chat history and return it as the new context",
+          "id": "history",
+          "key": "history",
+          "label": "common:core.module.output.label.New context",
+          "required": true,
+          "type": "static",
+          "valueType": "chatHistory"
+        },
+        {
+          "description": "Triggered after the streaming response finishes",
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "required": true,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "reasoningText",
+          "invalid": true,
+          "key": "reasoningText",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 7170,
+        "y": -435
+      },
+      "showStatus": true,
+      "version": "4.9.7"
+    },
+    {
+      "avatar": "core/workflow/template/httpRequest",
+      "catchError": false,
+      "flowNodeType": "httpRequest468",
+      "inputs": [
+        {
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": true,
+            "showDescription": false
+          },
+          "debugLabel": "",
+          "deprecated": false,
+          "description": "common:core.module.input.description.HTTP Dynamic Input",
+          "key": "system_addInputParam",
+          "label": "",
+          "renderTypeList": [
+            "addInputParam"
+          ],
+          "required": false,
+          "selectedType": "addInputParam",
+          "toolDescription": "",
+          "valueType": "dynamic"
+        },
+        {
+          "debugLabel": "",
+          "key": "system_httpMethod",
+          "label": "",
+          "renderTypeList": [
+            "custom"
+          ],
+          "required": true,
+          "selectedType": "custom",
+          "toolDescription": "",
+          "value": "POST",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "system_httpTimeout",
+          "label": "",
+          "max": 600,
+          "min": 5,
+          "renderTypeList": [
+            "custom"
+          ],
+          "required": true,
+          "selectedType": "custom",
+          "toolDescription": "",
+          "value": 30,
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Http Request Url",
+          "key": "system_httpReqUrl",
+          "label": "",
+          "placeholder": "https://example.invalid/redacted",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "required": true,
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "https://example.invalid/redacted",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Http Request Header",
+          "key": "system_httpHeader",
+          "label": "",
+          "placeholder": "common:core.module.input.description.Http Request Header",
+          "renderTypeList": [
+            "custom"
+          ],
+          "required": false,
+          "selectedType": "custom",
+          "toolDescription": "",
+          "value": [
+            {
+              "key": "Content-Type",
+              "type": "string",
+              "value": "application/json"
+            }
+          ],
+          "valueType": "any"
+        },
+        {
+          "debugLabel": "",
+          "key": "system_httpParams",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "required": false,
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": [],
+          "valueType": "any"
+        },
+        {
+          "debugLabel": "",
+          "key": "system_httpJsonBody",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "required": false,
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "{\"max_results\": 5, \"query\": \"{{user_input}}\", \"search_depth\": \"basic\"}",
+          "valueType": "any"
+        },
+        {
+          "debugLabel": "",
+          "key": "system_httpFormBody",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "required": false,
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": [],
+          "valueType": "any"
+        },
+        {
+          "debugLabel": "",
+          "key": "system_httpContentType",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "required": false,
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "json",
+          "valueType": "string"
+        },
+        {
+          "canEdit": true,
+          "customInputConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": true,
+            "showDescription": false
+          },
+          "key": "user_input",
+          "label": "user_input",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "value": [
+            "mRbX5Nfd1LW1qV2a",
+            "answerText"
+          ],
+          "valueType": "string"
+        }
+      ],
+      "intro": "Can send an HTTP request to perform more complex operations (network search, database query, etc.)",
+      "name": "HTTP",
+      "nodeId": "aAnVPcn4EnZ9Z5fI",
+      "outputs": [
+        {
+          "description": "Raw HTTP response. Only accepts string or JSON type response data.",
+          "id": "httpRawResponse",
+          "key": "httpRawResponse",
+          "label": "workflow:raw_response",
+          "required": true,
+          "type": "static",
+          "valueType": "any"
+        },
+        {
+          "description": "Complete error object when the HTTP request fails, including message, status, code, data, and other fields.",
+          "id": "system_httpRawError",
+          "key": "system_httpRawError",
+          "label": "workflow:http_full_error",
+          "type": "error",
+          "valueType": "object"
+        },
+        {
+          "description": "",
+          "id": "error",
+          "key": "error",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        },
+        {
+          "customFieldConfig": {
+            "selectValueTypeList": [
+              "string",
+              "number",
+              "boolean",
+              "object",
+              "arrayString",
+              "arrayNumber",
+              "arrayBoolean",
+              "arrayObject",
+              "arrayAny",
+              "any",
+              "chatHistory",
+              "datasetQuote",
+              "dynamic",
+              "selectDataset",
+              "selectApp"
+            ],
+            "showDefaultValue": false,
+            "showDescription": false
+          },
+          "description": "Specified fields in the response value can be extracted through JSONPath syntax",
+          "id": "system_addOutputParam",
+          "key": "system_addOutputParam",
+          "label": "Output field extraction",
+          "type": "dynamic",
+          "valueType": "dynamic"
+        },
+        {
+          "description": "",
+          "id": "kJzyJw",
+          "key": "web_search_result",
+          "label": "web_search_result",
+          "type": "dynamic",
+          "valueType": "any"
+        }
+      ],
+      "position": {
+        "x": 5085,
+        "y": 225
+      },
+      "showStatus": true
+    },
+    {
+      "avatar": "core/workflow/template/ifelse",
+      "flowNodeType": "ifElseNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "ifElseList",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": [
+            {
+              "branchId": "IF",
+              "condition": "OR",
+              "list": [
+                {
+                  "condition": "isEmpty",
+                  "variable": [
+                    "ng0rIPn43rw9T6jX",
+                    "quoteQA"
+                  ]
+                }
+              ]
+            }
+          ],
+          "valueType": "any"
+        }
+      ],
+      "intro": "根据一定的条件，执行不同的分支。",
+      "name": "If Else",
+      "nodeId": "wzomBsPwLDKHlHGx",
+      "outputs": [
+        {
+          "description": "",
+          "id": "ifElseResult",
+          "key": "ifElseResult",
+          "label": "workflow:judgment_result",
+          "type": "static",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 4170,
+        "y": 1440
+      },
+      "showStatus": true
+    },
+    {
+      "avatar": "core/workflow/template/aiChat",
+      "catchError": false,
+      "flowNodeType": "chatNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "key": "model",
+          "label": "common:core.module.input.label.aiModel",
+          "renderTypeList": [
+            "settingLLMModel",
+            "reference"
+          ],
+          "selectedType": "settingLLMModel",
+          "toolDescription": "",
+          "value": "qwen-max",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "temperature",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "maxToken",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "isResponseAnswerText",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatQuoteRole",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": "system",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quoteTemplate",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "quotePrompt",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVision",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatAudio",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatVideo",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": false,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatExtractFiles",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoning",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "value": true,
+          "valueType": "boolean"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatReasoningEffort",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatTopP",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "number"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatStopSign",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatResponseFormat",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "key": "aiChatJsonSchema",
+          "label": "",
+          "renderTypeList": [
+            "hidden"
+          ],
+          "selectedType": "hidden",
+          "toolDescription": "",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "common:core.app.tip.systemPromptTip",
+          "isRichText": true,
+          "key": "systemPrompt",
+          "label": "common:core.ai.Prompt",
+          "maxLength": 100000,
+          "placeholder": "common:core.app.tip.chatNodeSystemPromptTip",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "You are an AI terminology and learning support assistant for a Beat the Bot (BTB) student activity.\n\nYour job is to explain AI-related terms, concepts, and system behaviors that students may encounter during the BTB experience, such as prompt, temperature, token, hallucination, context window, knowledge base, semantic search, and other related concepts.\n\nFollow these rules when answering:\n- Base your answer solely on the provided internet search results. Do not invent information that is not supported by the search results.\n- Begin your response with a clear warning that the answer is generated based on internet search results and may not be fully accurate or up-to-date.\n- Summarize the search results clearly and concisely in student-friendly English, directly addressing the student's question.\n- Keep the answer structured and concise unless the user asks for more detail.\n- Use the following structure for your answer:\n- \n  - Accuracy Warning: \n\"Warning: The following answer is generated based on internet search results and may not be fully accurate or up-to-date. Please verify important information from reliable sources.\"\n- Summary of Key Findings: A brief, direct answer to the student's question.\n- Relevant Details: Supporting information, explanations, or examples from the search results.\n- Sources/Links: List the specific URLs or source titles from the search results where the information was found.\n- If the search results are insufficient to answer the question confidently, clearly say: \"The internet search results do not provide enough information to answer this question confidently.\" Do not guess or fabricate.\n- If the user’s question is vague, provide the closest relevant information from the search results and encourage the user to ask a more specific question.\n- Focus on helping students understand how AI works in the BTB activity, not just giving abstract definitions.\n- If relevant, explain how the concept affects whether a student can “beat the bot,” such as through better prompting, clearer instructions, or improved context.\nInternet Search Results: {{$aAnVPcn4EnZ9Z5fI.kJzyJw$}}\nStudent Question: {{$mRbX5Nfd1LW1qV2a.answerText$}}",
+          "valueType": "string"
+        },
+        {
+          "debugLabel": "",
+          "description": "workflow:max_dialog_rounds",
+          "key": "history",
+          "label": "common:core.module.input.label.chat history",
+          "max": 50,
+          "min": 0,
+          "renderTypeList": [
+            "agentGenerated",
+            "numberInput",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "numberInput",
+          "toolDescription": "",
+          "value": 10,
+          "valueType": "chatHistory"
+        },
+        {
+          "debugLabel": "Dataset citation",
+          "description": "",
+          "key": "quoteQA",
+          "label": "",
+          "renderTypeList": [
+            "settingDatasetQuotePrompt"
+          ],
+          "selectedType": "settingDatasetQuotePrompt",
+          "toolDescription": "",
+          "value": [
+            "ng0rIPn43rw9T6jX",
+            "quoteQA"
+          ],
+          "valueType": "datasetQuote"
+        },
+        {
+          "debugLabel": "",
+          "key": "userChatInput",
+          "label": "workflow:user_question",
+          "renderTypeList": [
+            "agentGenerated",
+            "reference",
+            "textarea"
+          ],
+          "required": true,
+          "selectedType": "reference",
+          "toolDescription": "User Question",
+          "value": [
+            "mRbX5Nfd1LW1qV2a",
+            "answerText"
+          ],
+          "valueType": "string"
+        }
+      ],
+      "intro": "AI 大模型对话",
+      "name": "AI Summarized Output",
+      "nodeId": "kGvdU7CGgPs4aE6K",
+      "outputs": [
+        {
+          "description": "Combine the current response with Chat history and return it as the new context",
+          "id": "history",
+          "key": "history",
+          "label": "common:core.module.output.label.New context",
+          "required": true,
+          "type": "static",
+          "valueType": "chatHistory"
+        },
+        {
+          "description": "Triggered after the streaming response finishes",
+          "id": "answerText",
+          "key": "answerText",
+          "label": "common:core.module.output.label.Ai response content",
+          "required": true,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "reasoningText",
+          "invalid": true,
+          "key": "reasoningText",
+          "label": "workflow:reasoning_content",
+          "required": false,
+          "type": "static",
+          "valueType": "string"
+        },
+        {
+          "description": "",
+          "id": "system_error_text",
+          "key": "system_error_text",
+          "label": "workflow:error_text",
+          "type": "error",
+          "valueType": "string"
+        }
+      ],
+      "position": {
+        "x": 6000,
+        "y": 525
+      },
+      "showStatus": true,
+      "version": "4.9.7"
+    },
+    {
+      "avatar": "core/workflow/template/reply",
+      "flowNodeType": "answerNode",
+      "inputs": [
+        {
+          "debugLabel": "",
+          "description": "common:core.module.input.description.Response content",
+          "isRichText": false,
+          "key": "text",
+          "label": "common:core.module.input.label.Response content",
+          "maxLength": 100000,
+          "placeholder": "common:core.module.input.description.Response content",
+          "renderTypeList": [
+            "agentGenerated",
+            "textarea",
+            "reference"
+          ],
+          "required": true,
+          "selectedType": "textarea",
+          "toolDescription": "",
+          "value": "Sorry, your question seems to be outside the scope of Beat the Bot. \nIf you have any questions about BTB, feel free to ask!",
+          "valueType": "any"
+        }
+      ],
+      "intro": "This module can directly reply with a specified content. Commonly used for guidance or prompts. Non-string content will be converted to string for output.",
+      "name": "Assigned Reply",
+      "nodeId": "meqMF9YTB55JXHGb",
+      "outputs": [],
+      "position": {
+        "x": 3090,
+        "y": 2055
+      }
+    }
+  ],
+  "type": "advanced"
+}

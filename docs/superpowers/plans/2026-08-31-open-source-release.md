@@ -132,7 +132,7 @@ public demo deployment remain release audit work.
 - Create: `scripts/sanitize_fastgpt_export.py`
 - Create: `apps/api/tests/release/test_fastgpt_baseline.py`
 
-- [ ] **Step 1: Write the failing sanitization test**
+- [x] **Step 1: Write the failing sanitization test**
 
 ```python
 def test_baseline_has_no_account_or_secret_fields() -> None:
@@ -141,28 +141,36 @@ def test_baseline_has_no_account_or_secret_fields() -> None:
         assert forbidden not in lowered
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_fastgpt_baseline.py -q`
 
 Expected: FAIL because the sanitized baseline is absent.
 
-- [ ] **Step 3: Implement deterministic sanitization**
+- [x] **Step 3: Implement deterministic sanitization**
 
 The script accepts explicit input and output paths. Recursively remove authorization, API key, team/member, Dataset, Collection, App, cookie, and user identifier fields; replace account-specific URLs with `https://example.invalid/redacted`; preserve node types, public prompts, and graph edges. Refuse to overwrite the input and never print removed values. Run it on the user export only after confirming the input path.
 
-- [ ] **Step 4: Validate the output**
+- [x] **Step 4: Validate the output**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_fastgpt_baseline.py -q && python3 -m json.tool fastgpt/baseline.sanitized.json >/dev/null`
 
 Expected: tests pass and JSON is valid.
 
-- [ ] **Step 5: Commit only safe artifacts**
+- [x] **Step 5: Commit only safe artifacts**
 
 ```bash
 git add fastgpt scripts/sanitize_fastgpt_export.py apps/api/tests/release/test_fastgpt_baseline.py
 git commit -m "docs: add sanitized fastgpt baseline"
 ```
+
+Implementation notes (2026-09-08): Generated a review-only copy from the original
+BTB export without modifying it. Confirmed all 13 node IDs/types and 12 edges
+match the original. Added BOM-aware deterministic sanitization with no-overwrite
+protection, private-field/key-value removal, embedded JSON sanitization and URL
+redaction. Release/security tests: 31 passed; Ruff, JSON parsing and publication
+scan passed. No remote workflow was imported, executed or published. This tool
+is not a universal secret detector; new exports require manual review.
 
 ### Task 4: Publish a reproducible evaluation report
 
