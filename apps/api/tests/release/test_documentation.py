@@ -8,7 +8,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
 DOCUMENTS = (
-    "README.md", "LICENSE", "CONTRIBUTING.md", "docs/architecture.md",
+    "README.md", "README.en.md", "docs/local-development.md", "LICENSE", "CONTRIBUTING.md", "docs/architecture.md",
     "docs/evaluation.md", "docs/security-and-data.md",
 )
 
@@ -23,9 +23,25 @@ def test_public_document_and_local_links_exist(path):
             assert (document.parent / target.split("#")[0]).is_file(), target
 
 
-def test_readme_separates_targets_and_results():
-    text = (ROOT / "README.md").read_text()
-    assert "Target thresholds" in text and "Measured results" in text
+def test_readmes_link_to_separate_targets_and_measured_results():
+    for filename in ("README.md", "README.en.md"):
+        text = (ROOT / filename).read_text()
+        assert "](docs/local-development.md)" in text
+        assert "](docs/evaluation.md)" in text
+        assert "](evals/reports/public-p0.md)" in text
+    guide = (ROOT / "docs/local-development.md").read_text()
+    assert "## Target thresholds" in guide and "## Measured results" in guide
+    assert "](../evals/reports/public-p0.json)" in guide
+
+
+def test_readmes_share_install_commands_and_language_navigation():
+    chinese = (ROOT / "README.md").read_text()
+    english = (ROOT / "README.en.md").read_text()
+    assert "[English](README.en.md)" in chinese
+    assert "[简体中文](README.md)" in english
+    assert re.findall(r"```sh\n(.*?)```", chinese, re.S) == re.findall(
+        r"```sh\n(.*?)```", english, re.S
+    )
 
 
 def test_evaluation_documents_every_case():
