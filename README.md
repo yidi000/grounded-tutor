@@ -102,14 +102,16 @@ software acceptance targets, not claims of model accuracy. Definitions and the
 
 ## Measured results
 
-The 2026-09-08 learning integration checkpoint (`802324e`) passed 40 ASK and
-8 learning evaluation cases, 58 frontend tests and 14 desktop E2E tests; 14 E2E
-cases were intentionally skipped for non-applicable project/mode combinations.
-Live synthetic learning probes passed twice with the published generator,
-including a run using default HTTP timeouts. Office regression passed 4 tests
-with 1 image test skipped. See [integration scope](docs/learning-ui.md).
-These are dated development observations, not a published reproducibility report
-or proof of teaching quality. Release report packaging remains a later task.
+See the generated [public evaluation report](evals/reports/public-p0.md) and its
+[machine-readable measurements](evals/reports/public-p0.json) for the current
+published snapshot, evaluated commit, timestamp, category outcomes and targets.
+The JSON contains measured values; the Markdown is rendered from that JSON.
+Regenerate both by running `.venv/bin/python scripts/render_evaluation_report.py`.
+
+These deterministic results do not measure model accuracy. Earlier live synthetic
+learning and Office checks are separate integration evidence; see
+[integration scope](docs/learning-ui.md) and [generation verification](docs/fastgpt-generation.md).
+The public snapshot contains no raw source text, answers, traces or service configuration.
 
 ## Limitations and roadmap
 

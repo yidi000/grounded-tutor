@@ -164,3 +164,11 @@ def test_exact_example_paths_allowed_but_still_scanned(repo, path):
 def test_other_example_paths_remain_blocked(repo):
     tracked(repo, "nested/.env.example", "EXTERNAL_MODE=fake")
     assert scan(repo).returncode == 1
+
+
+@pytest.mark.parametrize("path", ["evals/reports/public-p0.json", "evals/reports/public-p0.md"])
+def test_reviewed_reports_allowed_but_credentials_still_rejected(repo, path):
+    target = tracked(repo, path, "public numeric results")
+    assert scan(repo).returncode == 0
+    target.write_text("fastgpt" + "-" + "a1B2c3D4" * 4)
+    assert scan(repo).returncode == 1

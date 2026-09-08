@@ -14,3 +14,5 @@ test-results/
 .superpowers/
 evals/reports/*
 !evals/reports/.gitkeep
+!evals/reports/public-p0.json
+!evals/reports/public-p0.md

@@ -181,7 +181,7 @@ is not a universal secret detector; new exports require manual review.
 - Modify: `README.md`
 - Create: `apps/api/tests/release/test_public_report.py`
 
-- [ ] **Step 1: Write the failing report test**
+- [x] **Step 1: Write the failing report test**
 
 ```python
 def test_report_counts_match_case_files() -> None:
@@ -193,28 +193,38 @@ def test_report_counts_match_case_files() -> None:
     assert "measured_metrics" in report
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_public_report.py -q`
 
 Expected: FAIL because the public report is absent.
 
-- [ ] **Step 3: Generate measured results without rewriting failures**
+- [x] **Step 3: Generate measured results without rewriting failures**
 
 Run all 48 cases from a clean database. The renderer includes commit hash, timestamp, adapter mode, configuration hash, passed/failed IDs, category metrics, target thresholds, measured metrics, and limitations. Preserve failing values and link their Bad Cases. README values must be read from the JSON report, never manually copied from targets.
 
-- [ ] **Step 4: Verify deterministic regeneration**
+- [x] **Step 4: Verify deterministic regeneration**
 
 Run: `.venv/bin/pytest apps/api/tests/release/test_public_report.py -q && git diff --exit-code evals/reports/public-p0.json evals/reports/public-p0.md`
 
 Expected: report tests pass and regeneration creates no diff.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/render_evaluation_report.py evals/reports/public-p0.json evals/reports/public-p0.md README.md apps/api/tests/release/test_public_report.py
 git commit -m "docs: publish reproducible evaluation results"
 ```
+
+Implementation notes (2026-09-08): Re-executed the fixed 40 ASK and 8 learning
+cases with disposable SQLite; all 48 passed. Public JSON exports only measured
+numbers, fixed case IDs, hashes and validated provenance, with targets separate.
+Markdown and failure sections derive from JSON; README links the generated report.
+Fixed-input render-only regeneration has no diff; fresh execution changes time
+and provenance intentionally. Only these two report filenames bypass the private
+report path block, not credential scanning. Release/security: 36 passed; backend:
+949 passed, 7 skipped; Ruff and public-file scan passed. This is a local commit,
+not GitHub publication, and does not measure live model or teaching quality.
 
 ### Task 5: Add opt-in live-service smoke tests
 
