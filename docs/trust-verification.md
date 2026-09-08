@@ -48,7 +48,9 @@ For an installed native copy, the equivalent local scan is:
 gitleaks git . --log-opts=--all --redact=100 --no-banner
 ```
 
-`verify-trust` does not require Docker or Gitleaks locally; historical scanning is a
-separate CI job. Browser E2E remains available through `make web-e2e` and is not part
-of this task's CI gate. GitHub-hosted execution must be checked after an authorized
-push; creating these files does not run Actions or configure branch protection.
+`verify-trust` itself does not require Docker or Gitleaks locally. The newer
+`release-check` gate includes `verify-learning`, desktop E2E, public report
+consistency and the shared history/index/worktree secret scan. CI is now configured
+for that release gate; the separate secret-scan job also uses the shared script.
+See [release readiness](release-checklist.md). GitHub-hosted execution must still
+be checked after an authorized push; these files do not configure branch protection.

@@ -37,3 +37,15 @@ verify-learning: verify-trust
 .PHONY: test-live
 test-live:
 	.venv/bin/python scripts/test_live.py
+
+.PHONY: release-check
+release-check: export RUN_LIVE_INTEGRATION=0
+release-check: export EXTERNAL_MODE=fake
+release-check: export DEMO_READ_ONLY=false
+release-check: export ENABLE_LOCAL_ADMIN=false
+release-check: verify-learning
+	.venv/bin/python -c 'from grounded_tutor.main import app; assert app.title == "Grounded Tutor API"'
+	.venv/bin/python scripts/render_evaluation_report.py --check
+	bash scripts/check_secrets.sh
+	git diff --check
+	git diff --cached --check

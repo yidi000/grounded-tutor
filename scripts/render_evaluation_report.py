@@ -200,9 +200,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "evals/reports")
     parser.add_argument("--render-only", action="store_true")
+    parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     output = args.output_dir
-    if args.render_only:
+    if args.render_only or args.check:
         report = json.loads((output / "public-p0.json").read_text())
     else:
         with tempfile.TemporaryDirectory(prefix="tutor-evaluation-") as directory:
@@ -231,6 +232,8 @@ def main():
         (output / "public-p0.json").write_text(
             json.dumps(report, indent=2, allow_nan=False) + "\n"
         )
+    if args.check:
+        return int((output / "public-p0.md").read_text() != markdown(report))
     (output / "public-p0.md").write_text(markdown(report))
     print(
         f"Public evaluation: {report['passed_cases']}/{report['total_cases']} passed."

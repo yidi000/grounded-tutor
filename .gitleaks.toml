@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "Reviewed BTB classification branch key referenced by graph wiring; not an API credential"
+condition = "AND"
+regexTarget = "line"
+paths = ['''(^|/)fastgpt/baseline\.sanitized\.json$''']
+regexes = ['''^\s*"key"\s*:\s*"fME371O0LlLnvJWK",?\s*$''']

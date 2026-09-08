@@ -83,14 +83,14 @@ Never place keys in frontend variables, tracked files or browser screenshots.
 ## Testing
 
 ```sh
-npm --prefix apps/web exec playwright install chromium
+npm --prefix apps/web exec -- playwright install chrome
 make verify-learning
 ```
 
 The gate runs backend tests, Ruff, frontend tests/build, 40 ASK evaluations,
 8 learning evaluations and desktop Playwright journeys. Browser dependencies may
-need installation on Linux. CI currently runs the trust gate and secret scan;
-the full learning gate is a local check. Live probes are opt-in and incur external
+need installation on Linux. CI is configured to run the release gate and secret scan, including desktop
+journeys; its hosted execution is still pending publication. Live probes are opt-in and incur external
 service calls; see [evaluation](docs/evaluation.md).
 
 To run the existing live probes explicitly with your local credentials:
@@ -104,6 +104,12 @@ configuration names without printing values and suppresses pytest tracebacks.
 It creates temporary cloud datasets using synthetic material and attempts cleanup;
 provider failures may require manual cleanup. Images remain conditional on the
 existing disabled-by-default capability. No credentials are copied into test files.
+
+Before release, stage the intended files and run `make release-check`. It includes
+`verify-learning`, API import, saved public report consistency and redacted secret
+scans of all Git history plus staged/working tracked snapshots. Install Gitleaks
+8.30.1 or run Docker for the pinned scanner fallback. Missing tools or findings
+fail the gate. See the [release checklist](docs/release-checklist.md).
 
 ## Target thresholds
 

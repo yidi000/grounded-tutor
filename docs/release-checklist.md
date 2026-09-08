@@ -1,0 +1,74 @@
+# Local release readiness
+
+This checklist prepares a local release candidate. It does not authorize remote
+creation, push, visibility changes, GitHub Pages deployment or public publication.
+The application is still a local single-user prototype with images disabled.
+
+## Gate
+
+Stage the intended changes, then run `make release-check` from the repository root.
+The target forces `EXTERNAL_MODE=fake` and `RUN_LIVE_INTEGRATION=0`, disables local
+administration and keeps API read-only mode off for isolated behavior tests.
+No live service calls are part of this gate.
+
+- `verify-learning` includes backend/release/sample/baseline tests, Ruff, frontend
+  tests, production build, the 40 ASK and 8 learning evaluations and desktop E2E.
+- The API import smoke check verifies module initialization, not full deployment.
+- `render_evaluation_report.py --check` checks the saved JSON-to-Markdown snapshot
+  without modifying it. The saved public report is dated and may describe an
+  earlier evaluated commit; fresh evaluations above do not silently rewrite it.
+- `check_secrets.sh` scans full Git history and both staged and working tracked
+  snapshots with redacted Gitleaks output. Ignored local files are not exported.
+  The existing public-file guard checks known local private values separately.
+- Whitespace checks inspect staged and unstaged diffs.
+
+Use Gitleaks 8.30.1 on PATH, or Docker for the pinned `v8.30.1` fallback. The fallback
+mounts the worktree and common Git directory read-only to support worktrees.
+The only rule exception is the exact historical BTB classification branch `key`
+line in `fastgpt/baseline.sanitized.json`, under the generic-key rule. It is a graph
+identifier with an edge reference, not a credential. Default rules remain enabled;
+an actual scanner probe confirmed that another API-key line in that file is blocked.
+
+No scanner available, Docker unavailable, or a secret finding means failure, never
+an implicit skip. Scanners do not prove the absence of all sensitive information.
+
+CI installs Chrome with its OS dependencies because Playwright selects the Chrome
+channel. Its workflow has read-only repository permissions, full checkout history
+and no provider credentials. Only a restricted numeric evaluation summary is uploaded;
+raw traces and browser failure artifacts remain unshared. Hosted CI has not run yet.
+
+## Checks before publication
+
+- [x] Run the complete local release gate on the staged candidate.
+- [x] Verify installation in a fresh directory without copying real `.env` or databases.
+- [x] Inspect Git history and remotes; no remote is configured. Final status is checked after commit.
+- [ ] Confirm hosted read-only demo reset, no-write proof, base path and local-setup link.
+- [ ] Obtain the owner's exact account/organization, repository name and visibility.
+- [ ] Obtain explicit authorization before creating a remote, pushing or deploying.
+- [ ] After publication: verify CI/Pages, clean clone and the actual deployed URL.
+
+The deterministic demo packaging is a separate next task. A local demo does not
+mean Pages is configured or deployed. Accounts and cloud Workspaces remain deferred.
+
+## Local evidence (2026-09-08)
+
+`make release-check` exited 0: 958 backend tests passed, 7 opted-out live tests
+skipped, 58 frontend tests passed, all 48 deterministic cases passed, and desktop
+E2E had 14 passed with 14 deliberate mode/project skips. Production build, API
+import, saved report consistency and whitespace checks passed. Gitleaks 8.30.1
+scanned 54 historical commits and both tracked snapshots without unresolved findings.
+The single graph-identifier false positive was independently reviewed; a real
+scanner positive/negative probe confirmed the narrow exception does not hide a
+synthetic API credential in the same file.
+
+A tracked-only temporary clone was overlaid with the staged candidate and given
+fresh Python and npm dependencies. With a new example-only config, migrations,
+API startup, 958 backend tests, 58 frontend tests and production build passed.
+This local run used Python 3.13.12 and Node 25.9.0; configured hosted CI uses Python
+3.12 and Node 24 and has not executed yet. Python dependencies are not fully locked.
+The Docker fallback was syntax/review checked; actual local scans used the native
+checksum-verified binary because Docker was not running.
+
+GitHub CLI authentication was not verified. No remote, repository, push, Pages
+configuration or publication was created. Continue with the separate static demo
+packaging task before requesting publication details and approval.

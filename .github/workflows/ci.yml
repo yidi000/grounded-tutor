@@ -1,4 +1,4 @@
-name: Trust verification
+name: Release verification
 on:
   push:
   pull_request:
@@ -10,15 +10,17 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       EXTERNAL_MODE: fake
+      RUN_LIVE_INTEGRATION: '0'
       FASTGPT_API_KEY: ''
       LLM_API_KEY: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
@@ -34,8 +36,9 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install -e 'apps/api[test]'
           npm --prefix apps/web ci
-      - name: Verify trust
-        run: make verify-trust
+          npm --prefix apps/web exec -- playwright install --with-deps chrome
+      - name: Verify release
+        run: make release-check
       - name: Upload numeric summary only
         uses: actions/upload-artifact@v7.0.1
         with:

@@ -311,7 +311,7 @@ to timeout; the example fixture correction avoids requiring unsupported examples
 - Modify: `.github/workflows/ci.yml`
 - Modify: `.github/workflows/secret-scan.yml`
 
-- [ ] **Step 1: Define and run the release gate**
+- [x] **Step 1: Define and run the release gate**
 
 `make release-check` runs `make verify-learning`, release tests, production build, API import smoke test, Gitleaks, tracked-file audit, baseline and sample tests, report regeneration check, and `git diff --check`.
 
@@ -334,7 +334,7 @@ Expected: clean worktree, intended commit history, approved or absent Remote, an
 
 Ask for the exact GitHub account/organization, repository name, public/private visibility, and permission to create/connect the remote. Do not create a public repository, push, or change visibility before confirmation.
 
-- [ ] **Step 4: Commit the release gate**
+- [x] **Step 4: Commit the release gate**
 
 ```bash
 git add docs/release-checklist.md Makefile .github
@@ -344,3 +344,11 @@ git commit -m "chore: add open source release gate"
 - [ ] **Step 5: Publish and verify a clean clone after confirmation**
 
 Create or connect only the approved repository, push the approved branch, wait for CI and the Pages deployment, then clone to a new temporary directory and run `make verify-foundation`. Open the deployed Pages URL and verify the fixed sample answer, Evidence Anchor interaction, local-setup link, and absence of non-read network requests. Expected: push succeeds, CI and Pages are green, the hosted smoke test passes, and the clean clone runs with fake adapters and no local secret files.
+
+Local preparation notes (2026-09-08): Release gate implemented and passed; see
+`docs/release-checklist.md` for exact counts and clean-install evidence. Step 2
+inspection found no remote and GitHub CLI authentication unverified; publication
+readiness remains pending. Step 3 is deferred until the separate deterministic
+hosted-demo addition is ready, so approval covers a concrete complete artifact.
+No push, repository creation or deployment occurred. Independent gate and exact
+Gitleaks graph-key exception reviews found no blocking issue.
